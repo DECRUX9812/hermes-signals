@@ -162,6 +162,27 @@ hermes-signals report
 `report` prints matched/correct/false-positive/policy counts and precision per
 signal. The same operations are exposed as MCP tools (`feedback`, `precision`).
 
+### Plug-and-forget (v0.3)
+
+Value from the first minute, zero configuration:
+
+```bash
+hermes-signals backfill          # read existing session history → seed the report
+hermes-signals status            # armed state, counts, auto-detected escalation mode
+hermes-signals digest            # weekly markdown report (numbers only)
+hermes-signals digest --cron-install   # register a Sunday 9am no-agent cron job
+```
+
+- **Backfill** scans Hermes `state.db`, OpenCode `opencode.db`, and Claude
+  Desktop JSONL (read-only, bounded, idempotent) so the first report is about
+  *your* agents, not a demo.
+- **Escalation auto-wires**: env vars → Hermes `config.yaml` → local endpoint
+  detection (ollama keyless; CLIProxy with an existing key) → gracefully off.
+  `--escalate` needs zero setup.
+- **Install self-check**: the Hermes plugin logs a one-time "armed" line on
+  first load and writes a marker; `status` summarizes everything.
+- **Digest cron** is a no-agent script job — no LLM cost, delivered verbatim.
+
 ## Trace format
 
 Signals accepts a small JSON object with an `events` list:

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
+from hermes_signals.backfill import backfill_sources
 from hermes_signals.classifier import classify_trace, stable_trace_id
-from hermes_signals.escalate import escalate_signals, escalation_config_from_env
+from hermes_signals.digest import build_digest_markdown, cron_install
+from hermes_signals.escalate import escalate_signals, resolve_escalation_config
+from hermes_signals.status import status_report
 from hermes_signals.store import precision_report, record_feedback
 
 _DEMO_TRACE: dict[str, Any] = {
@@ -43,13 +47,15 @@ def _payload(trace: dict[str, Any], strategy_sensitive: bool = False) -> dict[st
 
 
 def _escalated_payload(trace: dict[str, Any], strategy_sensitive: bool = False) -> dict[str, Any]:
-    config = escalation_config_from_env()
+    config = resolve_escalation_config()
     if config is None:
-        raise SystemExit(
-            "hermes-signals: --escalate requires HERMES_SIGNALS_ESCALATION_BASE_URL, "
-            "HERMES_SIGNALS_ESCALATION_MODEL (and optionally "
-            "HERMES_SIGNALS_ESCALATION_API_KEY) to be set."
+        print(
+            "hermes-signals: --escalate requested but no model config found; "
+            "running deterministic-only (set HERMES_SIGNALS_ESCALATION_* or "
+            "start ollama / CLIProxy to enable)",
+            file=sys.stderr,
         )
+        return _payload(trace, strategy_sensitive=strategy_sensitive)
     signals = escalate_signals(
         classify_trace(trace, strategy_sensitive=strategy_sensitive),
         trace,
@@ -119,6 +125,32 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
 
     report = subs.add_parser("report", help="Show per-signal precision from recorded feedback")
     report.add_argument("--output", choices=("text", "json"), default="text")
+
+    backfill = subs.add_parser(
+        "backfill",
+        help="Classify recent sessions from existing stores (hermes/opencode/claude)",
+    )
+    backfill.add_argument(
+        "--source",
+        action="append",
+        choices=("hermes", "opencode", "claude"),
+        help="Store to scan (repeatable; default: all)",
+    )
+    backfill.add_argument("--max-sessions", type=int, default=200)
+    backfill.add_argument("--dry-run", action="store_true", help="Report what would be scanned without writing")
+
+    subs.add_parser("status", help="Show armed state, store counts, and escalation mode")
+
+    digest = subs.add_parser(
+        "digest",
+        help="Print the weekly markdown digest (or install a weekly cron job)",
+    )
+    digest.add_argument("--out", default=None, help="Write markdown to a file instead of stdout")
+    digest.add_argument(
+        "--cron-install",
+        action="store_true",
+        help="Register a weekly no-agent cron job that delivers the digest",
+    )
     subparser.set_defaults(func=signals_command)
 
 
@@ -152,6 +184,49 @@ def signals_command(args: argparse.Namespace) -> int:
                 f"{signal_id:<24}{row['matched']:>9}{row['correct']:>9}"
                 f"{row['false_positive']:>5}{row['policy']:>8}{precision:>12}"
             )
+        return 0
+    if action == "backfill":
+        sources = args.source or ["hermes", "opencode", "claude"]
+        summary = backfill_sources(
+            sources,
+            max_sessions=args.max_sessions,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            print("(dry run — nothing written)")
+        for source, stats in summary.items():
+            print(
+                f"{source:<10} scanned={stats['sessions_scanned']:<4} "
+                f"signals={stats['signals_recorded']:<3} dupes={stats['skipped_duplicates']}"
+            )
+        return 0
+    if action == "status":
+        report = status_report()
+        print(f"Hermes Signals v{report['version']} — {'ARMED' if report['armed'] else 'not armed'}")
+        print(f"signals recorded:  {report['signals_recorded']}  ({report['signals_store']})")
+        print(f"feedback labels:  {report['feedback_recorded']}")
+        print(f"signals by type:  {report['signals_by_type']}")
+        esc = report["escalation"]
+        print(
+            f"escalation:       {esc['mode']}"
+            + (f" ({esc.get('model')} @ {esc.get('base_url')})" if esc.get("model") else "")
+        )
+        return 0
+    if action == "digest":
+        if args.cron_install:
+            result = cron_install()
+            if result["installed"]:
+                print(f"✅ weekly digest cron installed (job {result['job_id']})")
+            else:
+                print(f"⚠ could not register cron: {result.get('error')}")
+                print(f"  run manually: {result['manual']}")
+            return 0
+        markdown = build_digest_markdown()
+        if args.out:
+            Path(args.out).write_text(markdown, encoding="utf-8")
+            print(f"digest written to {args.out}")
+        else:
+            print(markdown)
         return 0
     if action == "demo":
         trace = _DEMO_TRACE

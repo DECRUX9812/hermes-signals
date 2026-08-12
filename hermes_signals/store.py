@@ -66,6 +66,20 @@ def record_turn(
     return payload
 
 
+def read_signals(path: Path | None = None) -> list[dict[str, Any]]:
+    """Read bounded signal records previously appended by :func:`record_turn`."""
+    return _read_jsonl(Path(path or default_store_path()))
+
+
+def append_payload(payload: dict[str, Any], path: Path | None = None) -> None:
+    """Append one bounded payload to the signal store (lock-protected)."""
+    destination = Path(path or default_store_path())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCK:
+        with destination.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
 def record_feedback(
     trace_id: str,
     signal_id: str,
@@ -136,9 +150,8 @@ def precision_report(
         row = by_signal.setdefault(signal_id, {"correct": 0, "false_positive": 0, "policy": 0})
         row[label] += 1
 
-    signals_file = Path(signals_path or default_store_path())
     matched_counts: dict[str, int] = {}
-    for payload in _read_jsonl(signals_file):
+    for payload in read_signals(signals_path):
         for signal in payload.get("signals", []):
             signal_id = str(signal.get("signal_id") or "")
             if signal_id:
@@ -163,7 +176,9 @@ def precision_report(
 __all__ = [
     "default_feedback_path",
     "default_store_path",
+    "append_payload",
     "precision_report",
+    "read_signals",
     "record_feedback",
     "record_turn",
 ]

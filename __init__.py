@@ -18,6 +18,7 @@ if _PLUGIN_DIR not in sys.path:
     sys.path.insert(0, _PLUGIN_DIR)
 
 from hermes_signals.cli import register_cli, signals_command  # noqa: E402
+from hermes_signals.status import arm_if_needed  # noqa: E402
 from hermes_signals.store import record_turn  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,12 @@ def _on_post_llm_call(**kwargs) -> None:
 
 def register(ctx) -> None:
     """Register the observer and ``hermes signals`` CLI command."""
+    if arm_if_needed():
+        logger.info(
+            "Hermes Signals armed — monitoring this session's tool calls. "
+            "Run `hermes signals demo` for a sample, or `hermes signals backfill` "
+            "to build a report from existing session history."
+        )
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_cli_command(
         name="signals",

@@ -94,6 +94,27 @@ def test_unknown_verdict_leaves_confirmation_unset() -> None:
     assert escalated[0].judge_model == CFG["model"]
 
 
+def test_rejected_tense_inside_markdown_fence_is_parsed() -> None:
+    from hermes_signals.escalate import _parse_verdict
+
+    content = '```json\n{\n  "verdict": "rejected",\n  "reason": "no evidence"\n}\n```'
+    assert _parse_verdict(content) is False
+    assert _parse_verdict('{"verdict": "confirmed"}') is True
+
+
+def test_prompt_includes_assistant_text_from_events() -> None:
+    from hermes_signals.escalate import _build_prompt
+
+    trace = {
+        "events": [
+            {"type": "assistant", "content": "The subagent finished, but I couldn't verify it."}
+        ]
+    }
+    signal = Signal("subagent-handoff-loss", "medium", "s", ("e",), ambiguous=True)
+    prompt = _build_prompt(signal, trace, 2000)
+    assert "The subagent finished" in prompt
+
+
 def test_unambiguous_signals_never_touch_the_network() -> None:
     signals = [Signal("y", "high", "s", ("e",), ambiguous=False)]
     with patch("urllib.request.urlopen") as mock:

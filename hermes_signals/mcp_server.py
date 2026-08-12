@@ -17,20 +17,26 @@ import json
 from pathlib import Path
 from typing import Any
 
+from hermes_signals.backfill import backfill_sources
 from hermes_signals.classifier import classify_trace, stable_trace_id
+from hermes_signals.digest import build_digest_markdown
+from hermes_signals.status import status_report
 from hermes_signals.store import precision_report, record_feedback
 
 __all__ = [
+    "backfill",
     "build_server",
     "demo",
+    "digest",
     "feedback",
     "main",
     "precision",
+    "status",
     "scan_trace",
     "scan_trace_file",
 ]
 
-_VERSION = "0.2.0"
+_VERSION = "0.3.0"
 
 _DEMO_TRACE: dict[str, Any] = {
     "events": [
@@ -127,6 +133,33 @@ async def precision() -> str:
     return _dump(precision_report())
 
 
+async def backfill(max_sessions: int = 200, dry_run: bool = False) -> str:
+    """Scan recent sessions from local stores and seed the signal store.
+
+    Reads Hermes ``state.db``, OpenCode ``opencode.db``, and Claude Desktop
+    JSONL (read-only), classifies each session, and appends bounded signal
+    records. Idempotent: already-seen traces are skipped. Pass ``dry_run`` to
+    only report what would be scanned.
+    """
+    return _dump(
+        backfill_sources(
+            ["hermes", "opencode", "claude"],
+            max_sessions=max_sessions,
+            dry_run=dry_run,
+        )
+    )
+
+
+async def status() -> str:
+    """Return the local Signals installation snapshot (armed, counts, mode)."""
+    return _dump(status_report())
+
+
+async def digest() -> str:
+    """Return the weekly markdown digest of Signals health."""
+    return build_digest_markdown()
+
+
 def build_server() -> Any:
     """Build an :class:`~mcp.server.mcpserver.MCPServer` exposing the tools."""
     from mcp.server.mcpserver import MCPServer
@@ -157,6 +190,21 @@ def build_server() -> Any:
         name="precision",
         description="Return per-signal precision metrics from recorded feedback.",
     )(precision)
+    server.tool(
+        name="backfill",
+        description=(
+            "Scan recent sessions from local stores (Hermes/OpenCode/Claude) "
+            "and seed the signal store; idempotent and read-only on sources."
+        ),
+    )(backfill)
+    server.tool(
+        name="status",
+        description="Return the local Signals snapshot: armed state, store counts, escalation mode.",
+    )(status)
+    server.tool(
+        name="digest",
+        description="Return the weekly markdown digest of Signals health (numbers only).",
+    )(digest)
     return server
 
 
