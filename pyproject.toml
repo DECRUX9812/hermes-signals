@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-signals"
+version = "0.1.0"
+description = "Local-first deterministic behavior-quality signals for Hermes Agent"
+readme = "README.md"
+requires-python = ">=3.11,<4"
+license = { file = "LICENSE" }
+authors = [{ name = "Ritesh Patel", email = "DECRUX9812@users.noreply.github.com" }]
+keywords = ["hermes-agent", "agents", "evaluation", "observability", "quality", "local-first"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Testing",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.8,<1",
+]
+
+[project.scripts]
+hermes-signals = "hermes_signals.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["hermes_signals*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.data-files]
+"." = ["plugin.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

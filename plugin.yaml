@@ -1,0 +1,12 @@
+name: hermes-signals
+version: 0.1.0
+description: >
+  Local-first deterministic behavior-quality signals for Hermes Agent.
+  Detect false success, retry loops, unverified changes, and credential-like
+  material without a model, GPU, network, or outbound telemetry.
+author: Ritesh Patel (DECRUX9812)
+kind: standalone
+platforms:
+  - linux
+  - macos
+  - windows
