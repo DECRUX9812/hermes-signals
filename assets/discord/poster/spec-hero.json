@@ -1,0 +1,28 @@
+{
+  "EYEBROW": "Hermes Signals \u00b7 open source",
+  "TAGLINE": "no api key \u00b7 no model \u00b7 no telemetry",
+  "HEADLINE": "Your agent said done.",
+  "HEADLINE2": "the trace says otherwise.",
+  "CARDS": [
+    {
+      "N": 1,
+      "KICKER": "Agent claims done",
+      "BODY": "\u201cdeployed successfully\u201d \u2014 it says, confidently",
+      "MONO": []
+    },
+    {
+      "N": 2,
+      "KICKER": "Signals checks the trace",
+      "BODY": "what actually happened",
+      "MONO": ["deploy \u2192 exit 1", "deploy \u2192 exit 1"]
+    },
+    {
+      "N": 3,
+      "KICKER": "False success",
+      "BODY": "tool failed \u00b7 agent claimed success \u00b7 now you know",
+      "MONO": []
+    }
+  ],
+  "FOOTER_CMD": "hermes plugins install DECRUX9812/hermes-signals --enable",
+  "REPO": "github.com/DECRUX9812/hermes-signals"
+}

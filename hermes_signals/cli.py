@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from hermes_signals.backfill import backfill_sources
+from hermes_signals.breaker import breaker_directive, new_state, note_call
 from hermes_signals.classifier import classify_trace, stable_trace_id
 from hermes_signals.corpus import corpus_summary, run_corpus
 from hermes_signals.digest import build_digest_markdown, cron_install
@@ -219,6 +220,19 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     webhook = subs.add_parser("webhook", help="Send a test alert to the configured webhook")
     webhook.add_argument("--url", default="", help="Override HERMES_SIGNALS_WEBHOOK_URL")
 
+    breaker = subs.add_parser(
+        "breaker",
+        help="Simulate N identical calls to see the circuit breaker trip",
+    )
+    breaker.add_argument("--calls", type=int, default=6, help="Number of identical calls (default 6)")
+    breaker.add_argument("--tool", default="terminal", help="Tool name (default: terminal)")
+    breaker.add_argument(
+        "--args",
+        required=True,
+        help='JSON object of tool arguments, e.g. \'{"command": "pytest -q"}\'',
+    )
+    breaker.add_argument("--session", default="demo", help="Session id for state (default: demo)")
+
     subparser.set_defaults(func=signals_command)
 
 
@@ -324,6 +338,8 @@ def signals_command(args: argparse.Namespace) -> int:
         return _run_guardrail(args)
     if action == "webhook":
         return _run_webhook(args)
+    if action == "breaker":
+        return _run_breaker(args)
     if action == "demo":
         trace = _DEMO_TRACE
     else:
@@ -452,6 +468,29 @@ def _run_webhook(args: argparse.Namespace) -> int:
     ok = webhook_notify(url, build_alert_payload(signal_ids=["test"], platform="cli"))
     print("✅ alert delivered" if ok else "⚠ delivery failed")
     return 0 if ok else 1
+
+
+def _run_breaker(args: argparse.Namespace) -> int:
+    """Simulate identical calls; print which call trips the circuit breaker."""
+    try:
+        call_args = json.loads(args.args)
+    except json.JSONDecodeError as exc:
+        print(f"hermes-signals: invalid --args JSON: {exc}")
+        return 2
+    state = new_state()
+    directive = None
+    blocked_at = 0
+    for call in range(1, args.calls + 1):
+        directive = breaker_directive(state, args.session, args.tool, call_args)
+        if directive and directive.get("action") == "block":
+            blocked_at = call
+            break
+        note_call(state, args.session, call_args)
+    if blocked_at:
+        print(f"call {blocked_at} BLOCKED — {directive['message']}")
+        return 1
+    print(f"PASS — {args.calls} identical calls, no breaker tripped")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -17,6 +17,7 @@ _PLUGIN_DIR = str(Path(__file__).resolve().parent)
 if _PLUGIN_DIR not in sys.path:
     sys.path.insert(0, _PLUGIN_DIR)
 
+from hermes_signals.breaker import breaker_directive, note_call  # noqa: E402
 from hermes_signals.cli import register_cli, signals_command  # noqa: E402
 from hermes_signals.guardrail import evaluate_guardrail  # noqa: E402
 from hermes_signals.notify import (  # noqa: E402
@@ -29,27 +30,32 @@ from hermes_signals.store import record_turn  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+_BREAKER_STATE: dict = {}
+
 
 def _on_pre_tool_call(tool_name, args=None, **kwargs) -> dict | None:
-    """Block credential-like tool arguments before they execute (guardrail).
+    """Enforce guardrails before a tool executes (secret-risk + circuit breaker).
 
     Fail-open: any scan error lets the call proceed. ``block`` (default)
     returns a pre_tool_call directive; ``warn`` records a local log entry.
     """
+    session_id = str(kwargs.get("session_id") or "")
+    name = str(tool_name or "")
+    call_args = args or {}
     try:
-        directive = evaluate_guardrail(str(tool_name or ""), args or {})
+        directive = evaluate_guardrail(name, call_args)
+        if not directive:
+            directive = breaker_directive(_BREAKER_STATE, session_id, name, call_args)
     except Exception:
         return None
     if not directive:
+        note_call(_BREAKER_STATE, session_id, call_args)
         return None
     action = directive.get("action", "warn")
-    append_guardrail_log(
-        tool_name=str(tool_name or ""),
-        action=action,
-        session_id=str(kwargs.get("session_id") or ""),
-    )
+    append_guardrail_log(tool_name=name, action=action, session_id=session_id)
     if action == "block":
         return directive
+    note_call(_BREAKER_STATE, session_id, call_args)
     return None
 
 

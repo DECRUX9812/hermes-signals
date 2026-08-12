@@ -84,6 +84,38 @@ AWS, Slack) plus entropy-gated `key=`/`Bearer` values, scanning the first 8 KiB
 of arguments so huge payloads stay cheap. The guardrail is fail-open — a scan
 error never blocks a call.
 
+## Circuit breakers (mid-run)
+
+The second half of enforcement: **stop the agent before it wastes more**. A
+session-scoped breaker watches what the agent actually calls and blocks
+pathological patterns deterministically:
+
+```text
+terminal: pytest -q          → ok
+terminal: pytest -q          → ok
+terminal: pytest -q          → ok
+terminal: pytest -q          → ok
+terminal: pytest -q          → BLOCKED  ← 5th identical call in this session
+          "hermes-signals circuit breaker: terminal called with identical
+           arguments 5 times. stop repeating this call and change strategy."
+```
+
+- **Retry-loop breaker** — blocks the Nth identical (tool + canonical args)
+  call in a session (`HERMES_SIGNALS_BREAKER_RETRY_N`, default `5`; `0` off).
+  Same tool + same arguments five times means the agent is looping, not adapting.
+- **Cost ceiling** — blocks once a session exceeds a hard tool-call budget
+  (`HERMES_SIGNALS_BREAKER_MAX_CALLS`, default `0` = off).
+
+```bash
+hermes signals breaker --calls 6 --args '{"command": "pytest -q"}'
+# → call 5 BLOCKED — …circuit breaker…
+```
+
+Actions follow `HERMES_SIGNALS_GUARDRAIL_ACTION` (`block`/`warn`/`off`), state
+is process-local and bounded, and the breaker is fail-open. Verified live
+through Hermes' tool dispatcher: call 5 of 5 identical calls is blocked;
+varied calls pass.
+
 ## Install (set and forget)
 
 ```bash
@@ -239,8 +271,10 @@ CI runs Python 3.11–3.13 plus the regression-corpus gate.
 - [x] Policy packs + regression corpus + CI gate
 - [x] One-shot `setup` and `doctor` self-check (set-and-forget)
 - [x] Pre-execution guardrails (block credential-like tool calls) + webhook alerts (v0.5)
+- [x] Session circuit breakers: retry-loop block + cost ceiling (v0.6)
+- [ ] Verification-before-claim gate (post_tool_call: mutation must be read-back/tested before "done") — no tool in the landscape covers this
+- [ ] Breaker cooldown + half-open probe (open → cooldown → probe) with per-tool error-rate × spend thresholds
 - [ ] More backfill sources (Cline, Aider, LangChain JSONL)
-- [ ] Retry-loop throttle guardrail (block after N identical failures)
 - [ ] Per-policy false-positive budget alerts in the digest
 
 ## Contributing

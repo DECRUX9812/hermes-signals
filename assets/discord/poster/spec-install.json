@@ -1,0 +1,28 @@
+{
+  "EYEBROW": "Hermes Signals \u00b7 open source",
+  "TAGLINE": "local-first \u00b7 deterministic \u00b7 mit",
+  "HEADLINE": "Install. Set. Forget.",
+  "HEADLINE2": "two commands \u2014 then it watches for you.",
+  "CARDS": [
+    {
+      "N": 1,
+      "KICKER": "Install",
+      "BODY": "adds the plugin to Hermes",
+      "MONO": ["hermes plugins install DECRUX9812/hermes-signals --enable"]
+    },
+    {
+      "N": 2,
+      "KICKER": "Set up",
+      "BODY": "backfills your history \u00b7 arms monitoring \u00b7 weekly digest",
+      "MONO": ["hermes signals setup"]
+    },
+    {
+      "N": 3,
+      "KICKER": "Done",
+      "BODY": "you never touch it again",
+      "MONO": []
+    }
+  ],
+  "FOOTER_CMD": "hermes signals doctor \u00b7 hermes signals digest",
+  "REPO": "github.com/DECRUX9812/hermes-signals"
+}

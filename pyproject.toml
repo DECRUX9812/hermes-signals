@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-signals"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local-first deterministic behavior-quality signals for Hermes Agent"
 readme = "README.md"
 requires-python = ">=3.11,<4"
@@ -59,3 +59,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"assets/discord/poster/generate.py" = ["E501"]  # vendored icon data lines

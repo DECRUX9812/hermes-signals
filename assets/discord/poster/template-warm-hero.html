@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --paper:#EAD9B0; --ink:#1F2A38; --navy:#243447; --navy2:#1B2735;
+    --rust:#B23A22; --cream:#F7EDD4; --red:#C0392B; --gold:#E9C46A;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1200px;height:900px;overflow:hidden}
+  body{
+    background:radial-gradient(1200px 620px at 50% -12%, #F6EBD2 0%, var(--paper) 55%, #D9C094 100%);
+    font-family:'Ubuntu Sans','Liberation Sans Narrow','DejaVu Sans Condensed',sans-serif;
+    color:var(--ink); position:relative;
+  }
+  /* paper grain */
+  body::after{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.55;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.42 0 0 0 0 0.30 0 0 0 0 0.18 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .frame{position:absolute;inset:18px;border:10px solid var(--ink);border-radius:14px;}
+  .frame::after{content:"";position:absolute;inset:8px;border:3px solid var(--rust);border-radius:8px;pointer-events:none;}
+  .inner{position:absolute;inset:34px;display:flex;flex-direction:column;padding:24px 44px 18px;}
+  .eyebrow-row{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:8px;}
+  .eyebrow{font-size:19px;letter-spacing:.4em;font-weight:700;color:var(--rust);text-transform:uppercase;}
+  .tagline{font-size:17px;font-weight:700;letter-spacing:.14em;color:var(--rust);text-transform:uppercase;white-space:nowrap;}
+  .headline{font-size:84px;line-height:.98;font-weight:800;font-stretch:condensed;text-transform:uppercase;letter-spacing:-.01em;}
+  .headline2{font-size:42px;font-weight:700;font-stretch:condensed;color:var(--rust);margin-top:4px;}
+  .cards{flex:1;display:flex;flex-direction:column;gap:18px;margin-top:16px;justify-content:center;}
+  .card{position:relative;display:flex;align-items:center;gap:22px;padding:15px 26px;border-radius:16px;background:var(--navy);border:4px solid var(--cream);box-shadow:7px 7px 0 rgba(31,42,56,.16);}
+  .card.c2{background:var(--navy2);}
+  .card.c3{background:var(--rust);}
+  .num{flex:0 0 56px;width:56px;height:56px;border-radius:50%;background:var(--cream);color:var(--navy);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;}
+  .card.c3 .num{color:var(--rust);}
+  .card-body{display:flex;flex-direction:column;gap:3px;min-width:0;}
+  .kicker{font-size:29px;font-weight:800;font-stretch:condensed;color:var(--cream);text-transform:uppercase;letter-spacing:.05em;}
+  .card.c3 .kicker{color:#FFE3D6;}
+  .mono{font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:20px;color:#FF8A70;}
+  .body{font-size:21px;font-weight:600;color:rgba(247,237,212,.88);}
+  .card:not(:last-child)::after{content:"";position:absolute;left:50%;bottom:-27px;width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-top:17px solid var(--ink);}
+  .footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:16px;padding:13px 22px;border-radius:12px;background:var(--ink);border:3px solid var(--cream);}
+  .cmd{font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:17px;color:var(--cream);white-space:nowrap;flex-shrink:0;}
+  .repo{font-size:14px;font-weight:700;letter-spacing:.08em;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+</style>
+</head>
+<body>
+<div class="frame"><div class="inner">
+  <div class="eyebrow-row">
+    <div class="eyebrow">{{EYEBROW}}</div>
+    <div class="tagline">{{TAGLINE}}</div>
+  </div>
+  <div class="headline">{{HEADLINE}}</div>
+  <div class="headline2">{{HEADLINE2}}</div>
+  <div class="cards">
+    {{#CARDS}}
+    <div class="card c{{N}}">
+      <div class="num">{{N}}</div>
+      <div class="card-body">
+        <div class="kicker">{{KICKER}}</div>
+        {{#MONO}}<div class="mono">{{.}}</div>{{/MONO}}
+        <div class="body">{{BODY}}</div>
+      </div>
+    </div>
+    {{/CARDS}}
+  </div>
+  <div class="footer">
+    <div class="cmd">{{FOOTER_CMD}}</div>
+    <div class="repo">{{REPO}}</div>
+  </div>
+</div></div>
+</body>
+</html>

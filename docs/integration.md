@@ -84,6 +84,21 @@ sees the reason and self-corrects). `warn` records to
 `$HERMES_HOME/signals-guardrail.jsonl` and proceeds. Fail-open: scan errors
 never block.
 
+### Circuit breakers (v0.6)
+
+Session-scoped mid-run enforcement: block the agent before it wastes more.
+
+```bash
+hermes-signals breaker --calls 6 --args '{"command": "pytest -q"}'   # simulate
+HERMES_SIGNALS_BREAKER_RETRY_N=5      # block Nth identical (tool, args) call (0=off)
+HERMES_SIGNALS_BREAKER_MAX_CALLS=0    # hard session tool-call ceiling (0=off)
+```
+
+The 5th identical call in a session returns a `pre_tool_call` block directive
+("stop repeating this call and change strategy"); the cost ceiling blocks once
+a session exceeds the budget. State is process-local, per-session, bounded;
+fail-open; actions follow `HERMES_SIGNALS_GUARDRAIL_ACTION`.
+
 ### Webhook alerts (v0.5, opt-in)
 
 Set `HERMES_SIGNALS_WEBHOOK_URL` and critical signals (e.g. `secret-risk`)
