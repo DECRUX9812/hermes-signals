@@ -23,6 +23,9 @@ class Signal:
     severity: str
     summary: str
     evidence: tuple[str, ...]
+    ambiguous: bool = False
+    confirmed: bool | None = None
+    judge_model: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +65,21 @@ _FAILURE_ADMISSION_WORDS = re.compile(
     r"timeout|did not|wasn['’]?t able)\b",
     re.IGNORECASE,
 )
+_ABANDONMENT_WORDS = re.compile(
+    r"\b(?:couldn['’]?t|could not|unable to|failed|failure|gave up|abandoned|"
+    r"not completed|wasn['’]?t able|timed out)\b",
+    re.IGNORECASE,
+)
+_SUBAGENT_TOOLS = {
+    "agent",
+    "claude",
+    "codex",
+    "delegate",
+    "delegate_task",
+    "opencode",
+    "spawn_agent",
+    "subagent",
+}
 _SECRET_PATTERNS = (
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_\-]{20,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
@@ -159,15 +177,36 @@ def _sensitive_event_text(event: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def _signal(signal_id: str, severity: str, summary: str, *evidence: str) -> Signal:
-    return Signal(signal_id, severity, summary, tuple(_redact(item) for item in evidence))
+def _signal(
+    signal_id: str,
+    severity: str,
+    summary: str,
+    *evidence: str,
+    ambiguous: bool = False,
+) -> Signal:
+    return Signal(signal_id, severity, summary, tuple(_redact(item) for item in evidence), ambiguous)
 
 
-def classify_trace(trace: dict[str, Any]) -> list[Signal]:
+def _is_subagent_name(name: str) -> bool:
+    return name in _SUBAGENT_TOOLS or "delegate" in name or "subagent" in name
+
+
+def _arguments_shape(args: Any) -> str:
+    """Stable fingerprint of an argument *shape* (keys only, values ignored)."""
+    if isinstance(args, dict):
+        return "{" + ",".join(sorted(str(key) for key in args)) + "}"
+    return _arguments_key(args) if isinstance(args, (list, tuple)) else str(args)
+
+
+def classify_trace(trace: dict[str, Any], *, strategy_sensitive: bool = False) -> list[Signal]:
     """Return deterministic quality signals for one trace.
 
     Signals are intentionally conservative. The returned evidence contains
     counts and booleans, never raw tool output, arguments, or response text.
+    ``strategy_sensitive`` (default off) also flags retry loops where only the
+    argument *values* changed while the strategy (tool + argument shape) did
+    not — the "arguments changed slightly but the strategy did not" case from
+    the rd-signal-2 alignment discussion.
     """
     events = _events(trace)
     calls = _tool_calls(events)
@@ -177,6 +216,15 @@ def classify_trace(trace: dict[str, Any]) -> list[Signal]:
 
     failed_results = [result for result in results if _is_failure(result)]
     successful_results = [result for result in results if not _is_failure(result)]
+    call_names = {
+        str(call.get("id", call.get("tool_call_id", ""))): _name(call) for call in calls
+    }
+    successful_names = {
+        call_names.get(
+            str(result.get("tool_call_id", result.get("result_for", ""))), _name(result)
+        )
+        for result in successful_results
+    }
     if (
         failed_results
         and not successful_results
@@ -193,6 +241,36 @@ def classify_trace(trace: dict[str, Any]) -> list[Signal]:
             )
         )
 
+    # Subagent handoff loss: a task was delegated, the subagent completed it,
+    # but the final response abandons or contradicts that success.
+    results_by_call = {
+        str(result.get("tool_call_id", result.get("result_for", ""))): result
+        for result in results
+    }
+    for call in calls:
+        name = _name(call)
+        if not _is_subagent_name(name):
+            continue
+        result = results_by_call.get(str(call.get("id", call.get("tool_call_id", ""))))
+        if result is None or _is_failure(result):
+            continue
+        if _ABANDONMENT_WORDS.search(response):
+            evidence = [
+                f"subagent_tool={name}",
+                "subagent_result_success=true",
+                "abandonment_in_final_response=true",
+            ]
+            ambiguous = bool(_SUCCESS_WORDS.search(response))
+            signals.append(
+                _signal(
+                    "subagent-handoff-loss",
+                    "medium",
+                    "Task handed to a subagent that completed it, but the final response abandoned the result",
+                    *evidence,
+                    ambiguous=ambiguous,
+                )
+            )
+
     failed_result_ids = {
         str(result.get("tool_call_id", result.get("result_for", "")))
         for result in failed_results
@@ -203,12 +281,19 @@ def classify_trace(trace: dict[str, Any]) -> list[Signal]:
         if _is_failure(call)
         or str(call.get("id", call.get("tool_call_id", ""))) in failed_result_ids
     ]
+    # Eventual success exempts a tool from retry-loop: if any attempt for the
+    # same tool name ultimately succeeded, repeated failures are persistence,
+    # not a stuck loop.
+    failed_calls = [
+        call for call in failed_calls if _name(call) not in successful_names
+    ]
     groups: dict[tuple[str, str], int] = {}
     for call in failed_calls:
         key = (_name(call), _arguments_key(call))
         groups[key] = groups.get(key, 0) + 1
     repeated = max(groups.values(), default=0)
-    if repeated >= 2:
+    identical_loop = repeated >= 2
+    if identical_loop:
         signals.append(
             _signal(
                 "retry-loop",
@@ -217,6 +302,23 @@ def classify_trace(trace: dict[str, Any]) -> list[Signal]:
                 f"identical_failed_attempts={repeated}",
             )
         )
+    elif strategy_sensitive:
+        shape_groups: dict[tuple[str, str], int] = {}
+        for call in failed_calls:
+            args = call.get("arguments", call.get("args", {}))
+            key = (_name(call), _arguments_shape(args))
+            shape_groups[key] = shape_groups.get(key, 0) + 1
+        repeated_shape = max(shape_groups.values(), default=0)
+        if repeated_shape >= 2:
+            signals.append(
+                _signal(
+                    "retry-loop",
+                    "medium",
+                    "Same failing strategy was repeated; only argument values changed",
+                    f"strategy_unchanged_attempts={repeated_shape}",
+                    ambiguous=True,
+                )
+            )
 
     mutation_calls = [call for call in calls if _name(call) in _MUTATION_TOOLS]
     verification_calls = [

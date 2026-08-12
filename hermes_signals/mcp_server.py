@@ -18,10 +18,19 @@ from pathlib import Path
 from typing import Any
 
 from hermes_signals.classifier import classify_trace, stable_trace_id
+from hermes_signals.store import precision_report, record_feedback
 
-__all__ = ["build_server", "demo", "main", "scan_trace", "scan_trace_file"]
+__all__ = [
+    "build_server",
+    "demo",
+    "feedback",
+    "main",
+    "precision",
+    "scan_trace",
+    "scan_trace_file",
+]
 
-_VERSION = "0.1.0"
+_VERSION = "0.2.0"
 
 _DEMO_TRACE: dict[str, Any] = {
     "events": [
@@ -95,6 +104,29 @@ async def demo() -> str:
     return _dump(_payload(_DEMO_TRACE))
 
 
+async def feedback(trace_id: str, signal_id: str, label: str, source: str = "") -> str:
+    """Record a human label for one signal.
+
+    Labels: ``correct`` (✅), ``false_positive`` (❌), or ``policy`` (🛠️ policy
+    should change). Appends a bounded record to the local feedback store; never
+    sends data anywhere.
+    """
+    try:
+        record = record_feedback(trace_id, signal_id, label, source=source)
+    except ValueError as exc:
+        return _dump({"error": str(exc)})
+    return _dump(record)
+
+
+async def precision() -> str:
+    """Return per-signal precision from recorded feedback.
+
+    Computes correct / (correct + false_positive) per signal over the local
+    feedback store. Deterministic and fully local.
+    """
+    return _dump(precision_report())
+
+
 def build_server() -> Any:
     """Build an :class:`~mcp.server.mcpserver.MCPServer` exposing the tools."""
     from mcp.server.mcpserver import MCPServer
@@ -114,6 +146,17 @@ def build_server() -> Any:
     )(scan_trace)
     server.tool(name="scan_trace_file", description="Classify a trace JSON file on disk.")(scan_trace_file)
     server.tool(name="demo", description="Run the built-in example trace and return detected signals.")(demo)
+    server.tool(
+        name="feedback",
+        description=(
+            "Record a human label (correct, false_positive, or policy) for one "
+            "signal id and trace id into the local feedback store."
+        ),
+    )(feedback)
+    server.tool(
+        name="precision",
+        description="Return per-signal precision metrics from recorded feedback.",
+    )(precision)
     return server
 
 

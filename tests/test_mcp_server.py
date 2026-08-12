@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from hermes_signals.mcp_server import demo, scan_trace, scan_trace_file
+from hermes_signals.mcp_server import demo, feedback, precision, scan_trace, scan_trace_file
 
 TRUE_SUCCESS = json.dumps(
     {
@@ -80,3 +80,20 @@ def test_scan_trace_file_reads_trace(tmp_path) -> None:
 def test_scan_trace_file_missing_path(tmp_path) -> None:
     payload = json.loads(_run(scan_trace_file(str(tmp_path / "does-not-exist.json"))))
     assert "error" in payload
+
+
+def test_feedback_records_label() -> None:
+    payload = json.loads(_run(feedback("trace-1", "false-success", "correct", source="test")))
+    assert payload["trace_id"] == "trace-1"
+    assert payload["label"] == "correct"
+
+
+def test_feedback_rejects_bad_label() -> None:
+    payload = json.loads(_run(feedback("trace-1", "false-success", "maybe")))
+    assert "error" in payload
+
+
+def test_precision_returns_report() -> None:
+    payload = json.loads(_run(precision()))
+    assert "signals" in payload
+    assert "total_feedback" in payload

@@ -51,6 +51,17 @@ Signals canonicalizes arguments before comparing them. It only counts repeated
 attempts when they are associated with failure. A changed path, changed
 arguments, or a successful result is not automatically a loop.
 
+Two refinements keep the signal honest:
+
+- **Eventual success exempts.** If any attempt for the same tool name
+  ultimately succeeded, repeated failures are treated as persistence, not a
+  stuck loop — the rd-signal-2 "eventual-success exempt" interpretation.
+- **Strategy-sensitive mode (opt-in).** With `strategy_sensitive=True` (or
+  `--strategy-sensitive` on the CLI), the signal also fires when only the
+  argument *values* changed while the tool and argument *shape* stayed the
+  same — the "arguments changed slightly but the strategy did not" case.
+  These matches are marked `ambiguous` and become escalation candidates.
+
 This signal is a review candidate, not proof of a bug. Retries can be correct
 for transient network failures. A future policy pack can add exemptions for
 known retry-safe operations and rate-limit backoff.
@@ -90,6 +101,55 @@ Treat this as an audit signal, not an automatic revocation system. Test keys,
 redacted examples, and prose can still produce false positives. For that
 reason, the Hermes plugin records it locally but does not send Discord alerts
 by default.
+
+## 5. Subagent handoff loss
+
+### Example
+
+```text
+Tool: delegate_task(goal="fix the login bug")
+Result: success — "subagent completed the fix and tests pass"
+Assistant: "The subagent finished the fix, but I couldn't verify it in time."
+```
+
+### Match conditions
+
+Signals matches when all of these are true:
+
+1. a subagent-family tool (`delegate_task`, `subagent`, `codex`, ...) is called;
+2. its result is successful (the delegated work actually completed); and
+3. the final response uses abandonment language ("couldn't", "gave up",
+   "unable to", ...) about the task the subagent completed.
+
+### Non-match conditions
+
+These should not alert:
+
+- the subagent itself failed (no completed work to lose);
+- the final response acknowledges the subagent's completion;
+- the response abandons only a *separate* subtask the subagent never did.
+
+When the response mixes completion and abandonment language (ambiguous), the
+signal is marked `ambiguous` and becomes a two-stage escalation candidate.
+This exact case — "subagent finished, I couldn't verify" — was rejected by a
+live Gemini judge during v0.2 testing: the agent acknowledged the handoff, so
+the honest caveat is not handoff loss. Escalation is how that judgment gets
+made locally without shipping a broader heuristic.
+
+## 6. Two-stage escalation (ambiguous candidates)
+
+The deterministic stage is free and always runs. A tiny set of signals is
+marked `ambiguous` because the evidence genuinely cuts both ways:
+
+- strategy-sensitive retry loops (same shape, different values);
+- subagent handoff loss with mixed completion/abandonment language.
+
+When escalation is enabled, only those candidates are sent to a cheap model
+with a compact, redacted excerpt — "model calls should scale with uncertainty,
+not traffic". The verdict is attached as `confirmed: true | false | null`.
+Unambiguous signals never touch the model. Escalation is off by default and
+never raises: a transport failure leaves the candidate unconfirmed, exactly as
+if escalation were disabled.
 
 ## Building a new signal
 

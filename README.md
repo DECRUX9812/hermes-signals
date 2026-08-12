@@ -124,9 +124,43 @@ HTTP (deployed). Full wiring is in `docs/integration.md`.
 | `retry-loop` | medium | At least two failed calls with the same tool name and canonicalized arguments | Finds wasted turns and rate-limit amplification |
 | `unverified-change` | medium | Mutation tool call plus success language, but no visible verification command or readback | Separates “edited” from “verified” |
 | `secret-risk` | critical | Credential-like pattern in event text, arguments, or results | Creates a local review signal without persisting the suspected secret |
+| `subagent-handoff-loss` | medium | A subagent-family tool succeeded but the final response abandons the completed result | Catches delegated work that gets lost or ignored (v0.2) |
 
 The policies intentionally prefer false negatives over noisy alerts. They are
 also versioned by behavior through tests, not by freezing a catalog snapshot.
+
+### v0.2 · two-stage escalation
+
+Deterministic filtering is stage 1 and always runs free. A small subset of
+signals is marked `ambiguous` (strategy-sensitive retry loops; subagent handoff
+loss with mixed language). With escalation enabled, **only** those candidates
+are confirmed by a cheap model — "model calls scale with uncertainty, not
+traffic", the rd-signal-2 pattern:
+
+```bash
+export HERMES_SIGNALS_ESCALATION_BASE_URL=http://127.0.0.1:8317/v1
+export HERMES_SIGNALS_ESCALATION_MODEL=gemini-3.6-flash-high
+export HERMES_SIGNALS_ESCALATION_API_KEY=your-key
+hermes-signals scan trace.json --escalate --strategy-sensitive
+```
+
+The verdict is attached as `confirmed: true | false | null` and shown as
+`[CONFIRMED]` / `[REJECTED]` / `[UNCONFIRMED]` in text output. Escalation is off
+by default and never raises.
+
+### v0.3 · feedback & precision
+
+Record human labels (Discord reactions map 1:1: ✅ correct, ❌ false_positive,
+🛠️ policy) and track per-signal precision over time:
+
+```bash
+hermes-signals feedback <trace-id> <signal-id> correct --source discord
+hermes-signals feedback <trace-id> <signal-id> false_positive
+hermes-signals report
+```
+
+`report` prints matched/correct/false-positive/policy counts and precision per
+signal. The same operations are exposed as MCP tools (`feedback`, `precision`).
 
 ## Trace format
 

@@ -12,6 +12,36 @@ python -m hermes_signals.cli scan trace.json --output json > signals.json
 A zero-signal result is still a successful scan. The CLI returns exit code 2
 only when the input file cannot be read or is not a JSON object.
 
+### Two-stage escalation (v0.2)
+
+`--escalate` confirms `ambiguous` candidates with a cheap model. Config comes
+from the environment:
+
+```bash
+export HERMES_SIGNALS_ESCALATION_BASE_URL=http://127.0.0.1:8317/v1
+export HERMES_SIGNALS_ESCALATION_MODEL=gemini-3.6-flash-high
+export HERMES_SIGNALS_ESCALATION_API_KEY=your-key
+hermes-signals scan trace.json --escalate --strategy-sensitive
+```
+
+Only ambiguous signals are sent (compact, redacted excerpt). Verdicts appear
+as `[CONFIRMED]` / `[REJECTED]` / `[UNCONFIRMED]`. Escalation is off by default
+and never raises.
+
+### Feedback & precision (v0.3)
+
+Labels map to Discord reactions (✅ correct, ❌ false_positive, 🛠️ policy):
+
+```bash
+hermes-signals feedback <trace-id> <signal-id> correct --source discord
+hermes-signals report
+```
+
+Feedback appends bounded records to `$HERMES_HOME/signals-feedback.jsonl`
+(never sent anywhere); `report` aggregates per-signal precision from
+`signals.jsonl` + feedback. Both are available as MCP tools (`feedback`,
+`precision`).
+
 ## Hermes plugin
 
 The root `__init__.py` is the Hermes adapter. Hermes loads it, calls
