@@ -10,8 +10,10 @@ from typing import Any
 
 from hermes_signals.backfill import backfill_sources
 from hermes_signals.classifier import classify_trace, stable_trace_id
+from hermes_signals.corpus import corpus_summary, run_corpus
 from hermes_signals.digest import build_digest_markdown, cron_install
 from hermes_signals.escalate import escalate_signals, resolve_escalation_config
+from hermes_signals.packs import apply_pack, installed_packs, load_pack
 from hermes_signals.status import status_report
 from hermes_signals.store import precision_report, record_feedback
 
@@ -36,17 +38,31 @@ def _load_trace(path: str) -> dict[str, Any]:
     return value
 
 
-def _payload(trace: dict[str, Any], strategy_sensitive: bool = False) -> dict[str, Any]:
+def _apply_pack_if_requested(signals, pack_path: str | None):
+    if pack_path:
+        return apply_pack(signals, load_pack(pack_path))
+    return signals
+
+
+def _payload(
+    trace: dict[str, Any],
+    strategy_sensitive: bool = False,
+    pack_path: str | None = None,
+) -> dict[str, Any]:
+    signals = _apply_pack_if_requested(
+        classify_trace(trace, strategy_sensitive=strategy_sensitive), pack_path
+    )
     return {
         "trace_id": stable_trace_id(trace),
-        "signals": [
-            signal.to_dict()
-            for signal in classify_trace(trace, strategy_sensitive=strategy_sensitive)
-        ],
+        "signals": [signal.to_dict() for signal in signals],
     }
 
 
-def _escalated_payload(trace: dict[str, Any], strategy_sensitive: bool = False) -> dict[str, Any]:
+def _escalated_payload(
+    trace: dict[str, Any],
+    strategy_sensitive: bool = False,
+    pack_path: str | None = None,
+) -> dict[str, Any]:
     config = resolve_escalation_config()
     if config is None:
         print(
@@ -55,9 +71,11 @@ def _escalated_payload(trace: dict[str, Any], strategy_sensitive: bool = False) 
             "start ollama / CLIProxy to enable)",
             file=sys.stderr,
         )
-        return _payload(trace, strategy_sensitive=strategy_sensitive)
+        return _payload(trace, strategy_sensitive=strategy_sensitive, pack_path=pack_path)
     signals = escalate_signals(
-        classify_trace(trace, strategy_sensitive=strategy_sensitive),
+        _apply_pack_if_requested(
+            classify_trace(trace, strategy_sensitive=strategy_sensitive), pack_path
+        ),
         trace,
         base_url=config["base_url"],
         model=config["model"],
@@ -110,6 +128,7 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
             "strategy (tool + argument shape) stayed the same"
         ),
     )
+    scan.add_argument("--pack", default=None, help="Apply a policy pack (JSON/YAML) before reporting")
 
     demo = subs.add_parser("demo", help="Run the built-in false-success example")
     demo.add_argument("--output", choices=("text", "json"), default="text")
@@ -151,6 +170,14 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Register a weekly no-agent cron job that delivers the digest",
     )
+
+    corpus = subs.add_parser(
+        "corpus",
+        help="Run the labeled regression corpus (policy safety check)",
+    )
+    corpus.add_argument("--dir", default=None, help="Corpus directory (default: shipped corpus/)")
+
+    subs.add_parser("packs", help="List installed policy packs")
     subparser.set_defaults(func=signals_command)
 
 
@@ -228,6 +255,26 @@ def signals_command(args: argparse.Namespace) -> int:
         else:
             print(markdown)
         return 0
+    if action == "corpus":
+        results = run_corpus(args.dir)
+        summary = corpus_summary(results)
+        for result in results:
+            marker = "PASS" if result.passed else "FAIL"
+            print(
+                f"[{marker}] {result.name}: expected={sorted(result.expected)} "
+                f"actual={sorted(result.actual)}"
+            )
+        print(f"\ncorpus: {summary['passed']}/{summary['total']} passed")
+        return 0 if summary["failed"] == 0 else 1
+    if action == "packs":
+        packs = installed_packs()
+        if not packs:
+            print("no policy packs installed (~/.hermes/signals-packs/)")
+            return 0
+        for pack in packs:
+            version = f"v{pack['version']}" if pack.get("version") else "unversioned"
+            print(f"{pack['name']} ({version}) — {pack['path']}")
+        return 0
     if action == "demo":
         trace = _DEMO_TRACE
     else:
@@ -238,10 +285,11 @@ def signals_command(args: argparse.Namespace) -> int:
             return 2
 
     strategy_sensitive = getattr(args, "strategy_sensitive", False)
+    pack_path = getattr(args, "pack", None)
     payload = (
-        _escalated_payload(trace, strategy_sensitive=strategy_sensitive)
+        _escalated_payload(trace, strategy_sensitive=strategy_sensitive, pack_path=pack_path)
         if getattr(args, "escalate", False)
-        else _payload(trace, strategy_sensitive=strategy_sensitive)
+        else _payload(trace, strategy_sensitive=strategy_sensitive, pack_path=pack_path)
     )
     if args.output == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))

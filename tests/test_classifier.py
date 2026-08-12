@@ -104,7 +104,7 @@ def test_detects_unverified_file_change() -> None:
 
 
 def test_secret_signal_redacts_evidence_and_arguments() -> None:
-    secret = "ghp_123456789012345678901234567890"
+    secret = "sk-abcdefghijklmnopqrstuvwxyz1234"
     trace = {
         "events": [
             {"type": "tool_call", "name": "terminal", "arguments": {"command": f"token={secret}"}},
@@ -115,6 +115,62 @@ def test_secret_signal_redacts_evidence_and_arguments() -> None:
     secret_signal = next(signal for signal in signals if signal.signal_id == "secret-risk")
     assert secret not in repr(secret_signal)
     assert secret_signal.severity == "critical"
+
+
+def test_low_entropy_values_are_not_secret_risk() -> None:
+    trace = {
+        "events": [
+            {
+                "type": "tool_call",
+                "name": "update_record",
+                "arguments": {"mode": "api", "secret": "000000000000"},
+            },
+        ]
+    }
+
+    assert "secret-risk" not in ids(trace)
+
+
+def test_repeated_low_entropy_value_is_not_secret_risk() -> None:
+    trace = {
+        "events": [
+            {
+                "type": "tool_call",
+                "name": "terminal",
+                "arguments": {"command": "token=aaaaaaaaaaaaaaaaaaaa"},
+            },
+        ]
+    }
+
+    assert "secret-risk" not in ids(trace)
+
+
+def test_high_entropy_generic_secret_still_fires() -> None:
+    trace = {
+        "events": [
+            {
+                "type": "tool_call",
+                "name": "terminal",
+                "arguments": {"command": "token=K9xQm2Vp7LzR4tW8cB1nF3jH5sD6gY0a"},
+            },
+        ]
+    }
+
+    assert "secret-risk" in ids(trace)
+
+
+def test_strong_prefix_token_always_fires_regardless_of_entropy() -> None:
+    trace = {
+        "events": [
+            {
+                "type": "tool_call",
+                "name": "terminal",
+                "arguments": {"command": "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+            },
+        ]
+    }
+
+    assert "secret-risk" in ids(trace)
 
 
 def test_trace_adapter_maps_tool_calls_and_failures() -> None:

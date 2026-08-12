@@ -33,6 +33,9 @@ _DEFAULT_MAX_INPUT_CHARS = 2000
 _VERDICT_RE = re.compile(
     r'"verdict"\s*:\s*"(confirm(?:ed)?|reject(?:ed)?|unknown)"', re.IGNORECASE
 )
+_BATCH_VERDICT_RE = re.compile(
+    r'"([A-Za-z0-9\-]+)"\s*:\s*"(confirm(?:ed)?|reject(?:ed)?|unknown)"', re.IGNORECASE
+)
 
 
 def _build_prompt(signal: Signal, trace: dict[str, Any], max_input_chars: int) -> str:
@@ -90,22 +93,119 @@ def _parse_verdict(content: str | None) -> bool | None:
         return None
     match = _VERDICT_RE.search(content)
     if match:
-        return {
-            "confirm": True,
-            "confirmed": True,
-            "reject": False,
-            "rejected": False,
-        }.get(match.group(1).lower())
+        return _verdict_value(match.group(1))
     try:
         data = json.loads(content)
         verdict = str(data.get("verdict") or "").lower()
-        if verdict in ("confirm", "confirmed"):
-            return True
-        if verdict in ("reject", "rejected"):
-            return False
+        return _verdict_value(verdict)
     except (TypeError, ValueError):
         pass
     return None
+
+
+def _verdict_value(value: str | None) -> bool | None:
+    if not value:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in ("confirm", "confirmed"):
+        return True
+    if normalized in ("reject", "rejected"):
+        return False
+    return None
+
+
+def _parse_batch(content: str | None, case_ids: list[str]) -> dict[str, bool | None]:
+    """Parse a batch response into {case_id: verdict}. Tolerant of junk."""
+    verdicts: dict[str, bool | None] = {case_id: None for case_id in case_ids}
+    if not content:
+        return verdicts
+    for case_id, raw in _BATCH_VERDICT_RE.findall(content):
+        if case_id in verdicts:
+            verdicts[case_id] = _verdict_value(raw)
+    try:
+        data = json.loads(content)
+    except (TypeError, ValueError):
+        return verdicts
+    if isinstance(data, dict):
+        for case_id, raw in data.items():
+            if case_id in verdicts:
+                verdicts[case_id] = _verdict_value(str(raw) if raw is not None else None)
+    return verdicts
+
+
+def _build_batch_prompt(
+    signals: list[Signal], trace: dict[str, Any], max_input_chars: int
+) -> str:
+    response = _assistant_text(
+        [event for event in trace.get("events", []) if isinstance(event, dict)], trace
+    )
+    payload = {
+        "task": (
+            "You are a conservative reviewer for agent-behavior quality signals. "
+            "The deterministic stage flagged these cases; confirm only when the "
+            "evidence truly supports each signal."
+        ),
+        "final_response_excerpt": _redact(str(response))[:max_input_chars],
+        "cases": [
+            {
+                "case_id": signal.signal_id,
+                "signal": signal.to_dict(),
+            }
+            for signal in signals
+        ],
+        "question": "For every case, is the evidence enough to confirm the signal?",
+        "reply": 'JSON object mapping each case_id to "confirm" | "reject" | "unknown".',
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_double_check_prompt(signal: Signal, trace: dict[str, Any], max_input_chars: int) -> str:
+    response = _assistant_text(
+        [event for event in trace.get("events", []) if isinstance(event, dict)], trace
+    )
+    payload = {
+        "task": (
+            "Another reviewer rejected this agent-behavior signal. The deterministic "
+            "stage disagrees. Be adversarial: is this rejection a true false positive, "
+            "or did the first reviewer miss real evidence?"
+        ),
+        "final_response_excerpt": _redact(str(response))[:max_input_chars],
+        "signal": signal.to_dict(),
+        "reply": 'JSON object with "verdict": "confirm" | "reject" | "unknown" and a one-line "reason".',
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _double_check_one(
+    signal: Signal,
+    trace: dict[str, Any],
+    *,
+    base_url: str,
+    model: str,
+    api_key: str,
+    timeout: int,
+    max_input_chars: int,
+) -> bool | None:
+    """Adversarial re-verification of a rejected signal.
+
+    Disagreement (reject then confirm) resolves to None (unknown) rather than
+    trusting either call alone.
+    """
+    try:
+        prompt = _build_double_check_prompt(signal, trace, max_input_chars)
+        content = _call_model(
+            prompt,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            timeout=timeout,
+        )
+        second = _parse_verdict(content)
+    except Exception:
+        return None
+    if second is False:
+        return False
+    return None  # confirm or unknown → disagreement/uncertainty → unknown
 
 
 def escalate_signals(
@@ -117,13 +217,53 @@ def escalate_signals(
     api_key: str,
     timeout: int = _DEFAULT_TIMEOUT,
     max_input_chars: int = _DEFAULT_MAX_INPUT_CHARS,
+    batch: bool = True,
+    double_check: bool = True,
 ) -> list[Signal]:
     """Confirm ambiguous signals via a cheap model; leave the rest untouched.
 
-    Never raises: any transport or parse failure keeps the candidate as-is
-    with ``confirmed`` unset, so escalation cannot break the deterministic
-    stage.
+    Ambiguous signals are batched into a single call per trace (``batch``), and
+    rejected verdicts are adversarially re-verified (``double_check``) so a
+    single bad call cannot veto a real signal. Never raises: any transport or
+    parse failure keeps candidates as-is with ``confirmed`` unset.
     """
+    ambiguous = [signal for signal in signals if signal.ambiguous]
+    if not ambiguous:
+        return list(signals)
+
+    if batch and len(ambiguous) > 1:
+        verdicts: dict[str, bool | None] = {}
+        try:
+            prompt = _build_batch_prompt(ambiguous, trace, max_input_chars)
+            content = _call_model(
+                prompt,
+                base_url=base_url,
+                model=model,
+                api_key=api_key,
+                timeout=timeout,
+            )
+            verdicts = _parse_batch(content, [signal.signal_id for signal in ambiguous])
+        except Exception:
+            verdicts = {signal.signal_id: None for signal in ambiguous}
+        escalated: list[Signal] = []
+        for signal in signals:
+            if not signal.ambiguous:
+                escalated.append(signal)
+                continue
+            confirmed = verdicts.get(signal.signal_id)
+            if double_check and confirmed is False:
+                confirmed = _double_check_one(
+                    signal,
+                    trace,
+                    base_url=base_url,
+                    model=model,
+                    api_key=api_key,
+                    timeout=timeout,
+                    max_input_chars=max_input_chars,
+                )
+            escalated.append(replace(signal, confirmed=confirmed, judge_model=model))
+        return escalated
+
     escalated: list[Signal] = []
     for signal in signals:
         if not signal.ambiguous:
@@ -139,6 +279,16 @@ def escalate_signals(
                 timeout=timeout,
             )
             verdict = _parse_verdict(content)
+            if double_check and verdict is False:
+                verdict = _double_check_one(
+                    signal,
+                    trace,
+                    base_url=base_url,
+                    model=model,
+                    api_key=api_key,
+                    timeout=timeout,
+                    max_input_chars=max_input_chars,
+                )
         except Exception:
             verdict = None
             content = None

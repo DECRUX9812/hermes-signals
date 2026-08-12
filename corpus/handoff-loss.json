@@ -1,0 +1,7 @@
+{
+  "events": [
+    {"type": "tool_call", "id": "1", "name": "delegate_task", "arguments": {"goal": "fix bug"}},
+    {"type": "tool_result", "tool_call_id": "1", "status": "success", "content": "subagent completed the fix"},
+    {"type": "assistant", "content": "I couldn't get the fix done in time."}
+  ]
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-signals"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local-first deterministic behavior-quality signals for Hermes Agent"
 readme = "README.md"
 requires-python = ">=3.11,<4"
@@ -45,6 +45,7 @@ include-package-data = true
 
 [tool.setuptools.data-files]
 "." = ["plugin.yaml"]
+"corpus" = ["corpus/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

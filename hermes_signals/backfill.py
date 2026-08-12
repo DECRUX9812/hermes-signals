@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,8 @@ def _hermes_session(cur: sqlite3.Cursor, session_id: str, max_messages: int) -> 
             messages.append(
                 {"role": "tool", "tool_call_id": str(tool_call_id or ""), "content": str(content or "")}
             )
+        elif role == "user" and content:
+            messages.append({"role": "user", "content": str(content)})
         elif role == "assistant" and content:
             final_response = str(content)
             messages.append({"role": "assistant", "content": final_response})
@@ -183,6 +186,8 @@ def _opencode_session(cur: sqlite3.Cursor, session_id: str, max_messages: int) -
                 messages.append({"role": "assistant", "content": " ".join(assistant_text)})
             if tool_calls:
                 messages.append({"role": "assistant", "tool_calls": tool_calls})
+        elif role == "user" and assistant_text:
+            messages.append({"role": "user", "content": " ".join(assistant_text)})
     return messages[-max_messages:], session_id
 
 
@@ -268,6 +273,8 @@ def _adapt_claude_item(item: dict[str, Any]) -> list[dict[str, Any]]:
                         "error": bool(block.get("is_error")),
                     }
                 )
+            elif block.get("type") == "text" and block.get("text"):
+                adapted.append({"role": "user", "content": str(block["text"])})
     return adapted
 
 
@@ -346,6 +353,7 @@ def backfill_sources(
                         "trace_id": trace_id,
                         "session_id": str(session_id)[:128],
                         "platform": source,
+                        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
                         "signals": [signal.to_dict() for signal in signals],
                     }
                     if not dry_run:

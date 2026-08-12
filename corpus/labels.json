@@ -1,0 +1,14 @@
+{
+  "clean-verified": [],
+  "false-success": ["false-success"],
+  "false-success-admitted": [],
+  "eventual-success": [],
+  "retry-identical": ["retry-loop"],
+  "retry-changed-args": [],
+  "unverified-change": ["unverified-change"],
+  "secret-prefix": ["secret-risk"],
+  "secret-low-entropy": [],
+  "handoff-loss": ["subagent-handoff-loss"],
+  "handoff-acknowledged": [],
+  "handoff-ambiguous": ["subagent-handoff-loss"]
+}

@@ -56,6 +56,7 @@ def record_turn(
         "trace_id": stable_trace_id(trace),
         "session_id": str(session_id or "")[:128],
         "platform": str(platform or "")[:32],
+        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "signals": [signal.to_dict() for signal in signals],
     }
     destination = Path(path or default_store_path())
@@ -173,10 +174,54 @@ def precision_report(
     return {"signals": signals_report, "total_feedback": len(feedback)}
 
 
+def judge_agreement(
+    *,
+    signals_path: Path | None = None,
+    feedback_path: Path | None = None,
+) -> dict[str, Any]:
+    """Compare judge verdicts against human feedback labels.
+
+    A verdict is "judged" only when the stored signal has ``confirmed`` set.
+    Agreement: judge confirm + human correct, or judge reject + human
+    false_positive. Returns ratio or None when nothing is judged yet.
+    """
+    feedback = _read_jsonl(Path(feedback_path or default_feedback_path()))
+    labels: dict[tuple[str, str], str] = {}
+    for record in feedback:
+        trace_id = str(record.get("trace_id") or "")
+        signal_id = str(record.get("signal_id") or "")
+        label = str(record.get("label") or "")
+        if trace_id and signal_id and label in _LABELS:
+            labels[(trace_id, signal_id)] = label
+    agreed = 0
+    judged = 0
+    for payload in read_signals(signals_path):
+        for signal in payload.get("signals", []):
+            confirmed = signal.get("confirmed")
+            if confirmed is None:
+                continue
+            label = labels.get(
+                (str(payload.get("trace_id") or ""), str(signal.get("signal_id") or ""))
+            )
+            if not label:
+                continue
+            judged += 1
+            if (confirmed is True and label == "correct") or (
+                confirmed is False and label == "false_positive"
+            ):
+                agreed += 1
+    return {
+        "judged": judged,
+        "agreed": agreed,
+        "agreement": round(agreed / judged, 4) if judged else None,
+    }
+
+
 __all__ = [
     "default_feedback_path",
     "default_store_path",
     "append_payload",
+    "judge_agreement",
     "precision_report",
     "read_signals",
     "record_feedback",

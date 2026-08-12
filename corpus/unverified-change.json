@@ -1,0 +1,7 @@
+{
+  "events": [
+    {"type": "tool_call", "id": "1", "name": "patch", "arguments": {"path": "app.py"}},
+    {"type": "tool_result", "tool_call_id": "1", "status": "success", "content": "patched"},
+    {"type": "assistant", "content": "The code change is complete."}
+  ]
+}

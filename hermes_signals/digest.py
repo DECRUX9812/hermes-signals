@@ -10,12 +10,13 @@ prints the manual ``hermes cron add`` command instead.
 from __future__ import annotations
 
 import os
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from hermes_signals.status import status_report
-from hermes_signals.store import precision_report, read_signals
+from hermes_signals.store import judge_agreement, precision_report, read_signals
 
 __all__ = ["build_digest_markdown", "cron_install"]
 
@@ -55,6 +56,10 @@ def build_digest_markdown(*, hermes_home: str | Path | None = None) -> str:
         signals_path=home / "signals.jsonl",
         feedback_path=home / "signals-feedback.jsonl",
     )
+    agreement = judge_agreement(
+        signals_path=home / "signals.jsonl",
+        feedback_path=home / "signals-feedback.jsonl",
+    )
     when = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         "# Hermes Signals — weekly digest",
@@ -87,6 +92,19 @@ def build_digest_markdown(*, hermes_home: str | Path | None = None) -> str:
             "",
         ]
     )
+    if agreement["judged"]:
+        lines.extend(
+            [
+                "## Judge agreement",
+                "",
+                f"- {agreement['agreed']}/{agreement['judged']} verdicts matched human labels "
+                f"({_fmt_percent(agreement['agreement'])})",
+                "",
+            ]
+        )
+    trend = _trend_section(home / "signals.jsonl")
+    if trend:
+        lines.extend([trend, ""])
     records = read_signals(home / "signals.jsonl")
     for payload in records[-5:]:
         ids = ", ".join(s.get("signal_id", "") for s in payload.get("signals", []))
@@ -104,6 +122,48 @@ def build_digest_markdown(*, hermes_home: str | Path | None = None) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _fmt_percent(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.0%}"
+
+
+def _trend_section(signals_path: Path) -> str:
+    """Per-signal this-week vs last-week counts with a drift flag."""
+    from datetime import UTC, timedelta
+
+    now = datetime.now(UTC)
+    week_counts: dict[str, Counter] = {}
+    for payload in read_signals(signals_path):
+        ts = payload.get("ts")
+        if not ts:
+            continue
+        try:
+            stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if not (now - timedelta(days=14)) <= stamp <= now:
+            continue
+        bucket = "this" if (now - stamp).days < 7 else "prev"
+        for signal in payload.get("signals", []):
+            signal_id = str(signal.get("signal_id") or "")
+            if signal_id:
+                week_counts.setdefault(signal_id, Counter())[bucket] += 1
+    lines: list[str] = []
+    for signal_id in sorted(week_counts):
+        counts = week_counts[signal_id]
+        this_week = counts.get("this", 0)
+        prev_week = counts.get("prev", 0)
+        if this_week == 0:
+            continue  # only surface signals with recent (this-week) activity
+        drift = this_week >= 3 and (this_week >= 2 * prev_week if prev_week else this_week >= 5)
+        lines.append(
+            f"- `{signal_id}`: this week {this_week} · last week {prev_week}"
+            + (" ⚠ drift" if drift else "")
+        )
+    if not lines:
+        return ""
+    return "## Trend (last 14 days)\n\n" + "\n".join(lines) + "\n"
 
 
 def cron_install(

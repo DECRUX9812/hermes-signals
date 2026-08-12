@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -80,13 +81,42 @@ _SUBAGENT_TOOLS = {
     "spawn_agent",
     "subagent",
 }
-_SECRET_PATTERNS = (
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9_\-]{20,}\b"),
-    re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
-    re.compile(r"(?i)\b(?:token|api[_ -]?key|secret|password)\s*[:=]\s*[^\s,;]{12,}"),
+_STOPWORDS = {
+    "about", "after", "again", "also", "any", "are", "before", "been", "but",
+    "could", "did", "does", "for", "from", "had", "has", "have", "into", "its",
+    "just", "make", "made", "more", "not", "one", "out", "over", "should",
+    "some", "than", "that", "their", "them", "then", "there", "these", "they",
+    "this", "those", "through", "under", "use", "used", "using", "very", "was",
+    "were", "what", "when", "where", "which", "while", "will", "with", "would",
+    "your",
+}
+_CITATION_PATH_RE = re.compile(r"\b[\w./\\\-]+\.[A-Za-z]{2,4}\b")
+_CITATION_COUNT_RE = re.compile(r"\b\d+\s+pass(?:ed)?\b|\b\d+\s+failed\b")
+_CITATION_QUOTE_RE = re.compile(r'"([^"\n]{4,60})"')
+_SECRET_PREFIX_RE = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9_\-]{20,}|sk-[A-Za-z0-9]{20,}|"
+    r"AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,})\b"
 )
+_GENERIC_SECRET_RE = re.compile(
+    r"(?i)\b(?:token|api[_ -]?key|secret|password|authorization|bearer)"
+    r"\s*[:=]\s*([^\s,;]{12,})"
+)
+_MIN_SECRET_ENTROPY = 2.8  # bits per char: repeated/sequential values fail, real tokens pass
+
+
+def _shannon_entropy(value: str) -> float:
+    """Shannon entropy in bits per character (0.0 for empty/constant input)."""
+    if not value:
+        return 0.0
+    length = len(value)
+    counts: dict[str, int] = {}
+    for char in value:
+        counts[char] = counts.get(char, 0) + 1
+    total = 0.0
+    for count in counts.values():
+        probability = count / length
+        total -= probability * math.log2(probability)
+    return total
 
 
 def _events(trace: dict[str, Any]) -> list[dict[str, Any]]:
@@ -155,13 +185,22 @@ def _arguments_key(event: dict[str, Any]) -> str:
 
 def _redact(value: str) -> str:
     redacted = str(value)
-    for pattern in _SECRET_PATTERNS:
-        redacted = pattern.sub("[REDACTED_SECRET]", redacted)
+    redacted = _SECRET_PREFIX_RE.sub("[REDACTED_SECRET]", redacted)
+    redacted = _GENERIC_SECRET_RE.sub(
+        lambda m: f"{m.group(0)[: m.start(1) - m.start(0)]}[REDACTED_SECRET]",
+        redacted,
+    )
     return redacted
 
 
 def _has_secret(value: str) -> bool:
-    return any(pattern.search(value) for pattern in _SECRET_PATTERNS)
+    if _SECRET_PREFIX_RE.search(value):
+        return True
+    for match in _GENERIC_SECRET_RE.finditer(value):
+        candidate = match.group(1)
+        if len(candidate) >= 12 and _shannon_entropy(candidate) >= _MIN_SECRET_ENTROPY:
+            return True
+    return False
 
 
 def _sensitive_event_text(event: dict[str, Any]) -> str:
@@ -196,6 +235,38 @@ def _arguments_shape(args: Any) -> str:
     if isinstance(args, dict):
         return "{" + ",".join(sorted(str(key) for key in args)) + "}"
     return _arguments_key(args) if isinstance(args, (list, tuple)) else str(args)
+
+
+def _significant_words(text: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", text.lower())
+        if word not in _STOPWORDS
+    }
+
+
+def _topic_overlap(a: str, b: str) -> float:
+    words_a = _significant_words(a)
+    if not words_a:
+        return 0.0
+    return len(words_a & _significant_words(b)) / len(words_a)
+
+
+def _extract_citations(text: str) -> list[str]:
+    citations: list[str] = []
+    for match in _CITATION_PATH_RE.findall(text):
+        candidate = match.strip(".")
+        if candidate and not candidate.startswith(("http://", "https://", "www.")):
+            citations.append(candidate)
+    citations.extend(_CITATION_COUNT_RE.findall(text.lower()))
+    citations.extend(_CITATION_QUOTE_RE.findall(text))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for citation in citations:
+        if citation not in seen:
+            seen.add(citation)
+            unique.append(citation)
+    return unique[:10]
 
 
 def classify_trace(trace: dict[str, Any], *, strategy_sensitive: bool = False) -> list[Signal]:
@@ -271,6 +342,49 @@ def classify_trace(trace: dict[str, Any], *, strategy_sensitive: bool = False) -
                 )
             )
 
+    # Hallucinated evidence: a success claim cites artifacts absent from results.
+    result_text = " ".join(_text(result) for result in results)
+    citations = _extract_citations(response)
+    missing_citations = [citation for citation in citations if citation not in result_text]
+    if missing_citations and _SUCCESS_WORDS.search(response):
+        signals.append(
+            _signal(
+                "hallucinated-evidence",
+                "medium",
+                "Success claim cites evidence absent from the trace",
+                f"checked_citations={len(citations)}",
+                f"missing_citations={len(missing_citations)}",
+                ambiguous=True,
+            )
+        )
+
+    # Instruction drift: a long session whose final response left the topic.
+    instructions = [str(item) for item in trace.get("instructions", []) if item]
+    if not instructions:
+        instructions = [
+            str(event.get("content"))
+            for event in events
+            if event.get("type") == "user" and event.get("content")
+        ]
+    assistant_turns = sum(
+        1
+        for event in events
+        if event.get("type") in {"assistant", "assistant_message"} and _text(event)
+    )
+    if instructions and assistant_turns >= 5:
+        overlap = _topic_overlap(instructions[-1], response)
+        if overlap < 0.25:
+            signals.append(
+                _signal(
+                    "instruction-drift",
+                    "medium",
+                    "Final response diverged from the original instruction",
+                    f"instruction_words={len(_significant_words(instructions[-1]))}",
+                    f"topic_overlap={overlap:.2f}",
+                    ambiguous=True,
+                )
+            )
+
     failed_result_ids = {
         str(result.get("tool_call_id", result.get("result_for", "")))
         for result in failed_results
@@ -320,6 +434,43 @@ def classify_trace(trace: dict[str, Any], *, strategy_sensitive: bool = False) -
                 )
             )
 
+    # Cost runaway: a long failing grind with no success for the dominant tool.
+    # Uses the unfiltered failed calls (the retry-loop filter above excludes
+    # tools that eventually succeeded — that filter must not leak here).
+    total_calls = len(calls)
+    total_tokens = sum(int(event.get("token_count") or 0) for event in events)
+    failed_count = len(failed_results)
+    raw_failed_calls = [
+        call
+        for call in calls
+        if _is_failure(call)
+        or str(call.get("id", call.get("tool_call_id", ""))) in failed_result_ids
+    ]
+    if raw_failed_calls:
+        dominant_name = max(
+            {_name(call) for call in raw_failed_calls},
+            key=lambda name: sum(1 for call in raw_failed_calls if _name(call) == name),
+        )
+        dominant_succeeded = dominant_name in successful_names
+    else:
+        dominant_name = ""
+        dominant_succeeded = False
+    grinding = (total_calls >= 10 and failed_count >= 6) or (
+        total_tokens >= 50000 and failed_count >= 6
+    )
+    if grinding and not dominant_succeeded and _FAILURE_ADMISSION_WORDS.search(response):
+        evidence = [f"tool_calls={total_calls}", f"failed_results={failed_count}"]
+        if total_tokens:
+            evidence.append(f"total_tokens={total_tokens}")
+        signals.append(
+            _signal(
+                "cost-runaway",
+                "medium",
+                "Long failing grind with no successful outcome for the dominant tool",
+                *evidence,
+            )
+        )
+
     mutation_calls = [call for call in calls if _name(call) in _MUTATION_TOOLS]
     verification_calls = [
         call
@@ -358,6 +509,7 @@ def trace_from_conversation(
 ) -> dict[str, Any]:
     """Adapt OpenAI-shaped Hermes conversation messages into a trace envelope."""
     events: list[dict[str, Any]] = []
+    instructions: list[str] = []
     pending_names: dict[str, str] = {}
     for message in messages:
         if not isinstance(message, dict):
@@ -396,7 +548,13 @@ def trace_from_conversation(
             )
         elif role == "assistant" and _text(message):
             events.append({"type": "assistant", "content": _text(message)})
-    return {"events": events, "final_response": final_response}
+        elif role == "user" and _text(message):
+            instructions.append(_text(message))
+    return {
+        "events": events,
+        "final_response": final_response,
+        "instructions": instructions,
+    }
 
 
 def stable_trace_id(trace: dict[str, Any]) -> str:

@@ -1,0 +1,9 @@
+{
+  "events": [
+    {"type": "tool_call", "id": "1", "name": "write_file", "arguments": {"path": "app.py"}},
+    {"type": "tool_result", "tool_call_id": "1", "status": "success", "content": "written"},
+    {"type": "tool_call", "id": "2", "name": "terminal", "arguments": {"command": "pytest -q"}},
+    {"type": "tool_result", "tool_call_id": "2", "status": "success", "content": "3 passed"},
+    {"type": "assistant", "content": "Implemented and verified the change; tests pass."}
+  ]
+}

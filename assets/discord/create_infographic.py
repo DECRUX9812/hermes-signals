@@ -126,7 +126,7 @@ def draw_header(image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
     text_x = 92
     draw.text((text_x, 85), "HERMES", font=TITLE, fill=CREAM, stroke_width=2, stroke_fill=INK)
     draw.text((text_x, 177), "SIGNALS", font=TITLE, fill=ORANGE, stroke_width=2, stroke_fill=INK)
-    draw.text((text_x + 7, 274), "LOCAL-FIRST BEHAVIOR QUALITY FOR AI AGENTS", font=HEAD_SMALL, fill=CREAM)
+    draw.text((text_x + 7, 266), "LOCAL-FIRST BEHAVIOR QUALITY FOR AI AGENTS", font=HEAD_SMALL, fill=CREAM)
     draw_agent_illustration(image, draw)
 
 
@@ -193,9 +193,11 @@ def draw_footer(draw: ImageDraw.ImageDraw) -> None:
     draw.text((92, y1 + 78), command, font=command_font, fill=CREAM)
     center_text(draw, (1340, y1 + 48), "TEST IT  ·  BREAK IT", HEAD_SMALL, CREAM)
     center_text(draw, (1340, y1 + 92), "TELL US WHAT'S WRONG", HEAD_SMALL, ORANGE)
-    draw.text((92, y2 - 24), "github.com/DECRUX9812/hermes-signals", font=MONO_SMALL, fill=MUTED)
+    # Keep the metadata clear of the footer border: PIL's default anchor is the
+    # text top, so give the 21px line ~20px of clearance.
+    draw.text((92, y2 - 42), "github.com/DECRUX9812/hermes-signals", font=MONO_SMALL, fill=MUTED)
     draw.text(
-        (W - 92, y2 - 24),
+        (W - 92, y2 - 42),
         "MIT  ·  NO GPU  ·  NO API KEY  ·  NO TELEMETRY",
         font=MONO_SMALL,
         fill=MUTED,
