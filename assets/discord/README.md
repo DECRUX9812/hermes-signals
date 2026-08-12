@@ -1,6 +1,6 @@
 # Discord share asset
 
-- `hermes-signals-discord.png` — 1800×1013, Discord-ready 16:9 infographic.
+- `hermes-signals-discord.png` — 1600×1200, Discord-ready retro poster infographic.
 - `create_infographic.py` — deterministic Pillow renderer for regenerating the image.
 
 The graphic is intentionally self-contained and uses no remote assets or fonts.

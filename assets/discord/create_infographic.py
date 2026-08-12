@@ -1,18 +1,31 @@
 from __future__ import annotations
 
-import math
+import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "hermes-signals-discord.png"
-W, H = 1800, 1013
+W, H = 1600, 1200
 
 FONT_DIRS = [
     Path("/usr/share/fonts/truetype/lato"),
     Path("/usr/share/fonts/truetype/dejavu"),
+    Path("/usr/share/fonts/truetype/noto"),
 ]
+
+PAPER = (226, 198, 146)
+PAPER_LIGHT = (239, 216, 171)
+INK = (12, 25, 36)
+NAVY = (17, 39, 58)
+BLUE = (34, 67, 84)
+RUST = (177, 66, 32)
+ORANGE = (209, 82, 30)
+CREAM = (246, 224, 179)
+MUTED = (181, 154, 105)
+OLIVE = (94, 111, 63)
+RED = (199, 48, 39)
 
 
 def font(names: list[str], size: int) -> ImageFont.FreeTypeFont:
@@ -24,238 +37,228 @@ def font(names: list[str], size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-REG = font(["Lato-Regular.ttf", "DejaVuSans.ttf"], 24)
-MED = font(["Lato-Medium.ttf", "DejaVuSans.ttf"], 24)
-BOLD = font(["Lato-Bold.ttf", "DejaVuSans-Bold.ttf"], 24)
-BLACK = font(["Lato-Black.ttf", "DejaVuSans-Bold.ttf"], 24)
-MONO = font(["DejaVuSansMono.ttf"], 24)
-
-WHITE = (239, 246, 255)
-MUTED = (143, 165, 194)
-SUBTLE = (74, 100, 135)
-CYAN = (48, 224, 255)
-PURPLE = (173, 108, 255)
-RED = (255, 79, 112)
-AMBER = (255, 181, 71)
-GREEN = (91, 225, 157)
-PANEL = (14, 28, 50)
-PANEL_2 = (18, 36, 63)
-LINE = (42, 69, 103)
+TITLE = font(["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 100)
+TITLE_SMALL = font(["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 54)
+HEAD = font(["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 46)
+HEAD_SMALL = font(["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 32)
+BODY = font(["Lato-Regular.ttf", "DejaVuSans.ttf", "NotoSans-Regular.ttf"], 28)
+BODY_BOLD = font(["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 29)
+MONO = font(["DejaVuSansMono.ttf"], 27)
+MONO_SMALL = font(["DejaVuSansMono.ttf"], 21)
 
 
-def gradient_background() -> Image.Image:
-    image = Image.new("RGB", (W, H))
-    pixels = image.load()
-    for y in range(H):
-        for x in range(W):
-            t = y / H
-            r = int(5 + 5 * t)
-            g = int(12 + 12 * t)
-            b = int(27 + 22 * t)
-            glow = max(0.0, 1.0 - math.hypot((x - 1450) / 650, (y - 120) / 430))
-            r += int(13 * glow)
-            g += int(7 * glow)
-            b += int(24 * glow)
-            pixels[x, y] = (min(r, 255), min(g, 255), min(b, 255))
-    return image
-
-
-def glow_dot(base: Image.Image, xy: tuple[int, int], color: tuple[int, int, int], radius: int) -> None:
-    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    x, y = xy
-    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*color, 170))
-    layer = layer.filter(ImageFilter.GaussianBlur(radius // 2))
-    base.paste(layer, (0, 0), layer)
-
-
-def rounded(draw: ImageDraw.ImageDraw, box, radius=18, fill=PANEL, outline=None, width=1):
+def rounded(draw: ImageDraw.ImageDraw, box, radius: int, fill, outline=None, width: int = 1):
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
 
 
-def text(draw, xy, value, fnt, fill=WHITE, anchor=None):
-    draw.text(xy, value, font=fnt, fill=fill, anchor=anchor)
+def center_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], value: str, fnt, fill):
+    draw.text(xy, value, font=fnt, fill=fill, anchor="mm")
 
 
-def pill(draw, x, y, label, fill, text_fill=WHITE, fnt=MONO, pad_x=14, height=30):
-    box = draw.textbbox((0, 0), label, font=fnt)
-    width = box[2] - box[0] + pad_x * 2
-    rounded(draw, (x, y, x + width, y + height), radius=height // 2, fill=fill)
-    text(draw, (x + width // 2, y + height // 2), label, fnt, text_fill, anchor="mm")
-    return width
+def fit_font(text: str, names: list[str], max_size: int, max_width: int) -> ImageFont.FreeTypeFont:
+    for size in range(max_size, 14, -2):
+        fnt = font(names, size)
+        if fnt.getbbox(text)[2] <= max_width:
+            return fnt
+    return font(names, 14)
 
 
-def draw_grid(image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
-    for x in range(0, W, 80):
-        draw.line((x, 0, x, H), fill=(13, 31, 54), width=1)
-    for y in range(0, H, 80):
-        draw.line((0, y, W, y), fill=(13, 31, 54), width=1)
+def add_texture(image: Image.Image) -> None:
+    random.seed(20260811)
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    for _ in range(10500):
+        x = random.randrange(W)
+        y = random.randrange(H)
+        shade = random.choice([(25, 21, 13, 16), (255, 243, 201, 18), (74, 42, 21, 10)])
+        radius = random.choice([1, 1, 1, 2])
+        draw.ellipse((x, y, x + radius, y + radius), fill=shade)
+    for _ in range(80):
+        x = random.randrange(W)
+        y = random.randrange(H)
+        draw.line((x, y, x + random.randrange(14, 80), y + random.randrange(-3, 4)), fill=(45, 30, 15, 13), width=1)
+    image.alpha_composite(layer)
 
 
-def draw_trace_panel(draw: ImageDraw.ImageDraw) -> None:
-    x, y, w, h = 1050, 92, 660, 335
-    rounded(draw, (x, y, x + w, y + h), radius=24, fill=(10, 23, 43), outline=(38, 67, 103), width=2)
-    text(draw, (x + 30, y + 28), "ONE TRACE. FULL STORY.", MONO.font_variant(size=17), CYAN)
-    text(draw, (x + w - 30, y + 29), "SIGNAL / 001", MONO.font_variant(size=15), SUBTLE, anchor="ra")
-
-    rows = [
-        ("01", "update_record(id=42)", "TIMEOUT", RED),
-        ("02", "update_record(id=42)", "TIMEOUT", RED),
-        ("03", 'final: "successfully updated"', "CLAIM", AMBER),
-    ]
-    row_y = y + 90
-    for index, (num, label, status, color) in enumerate(rows):
-        cy = row_y + index * 78
-        if index < 2:
-            draw.line((x + 43, cy + 30, x + 43, cy + 78), fill=LINE, width=2)
-        draw.ellipse((x + 30, cy + 18, x + 56, cy + 44), fill=color)
-        text(draw, (x + 43, cy + 31), num, MONO.font_variant(size=11), (5, 14, 28), anchor="mm")
-        text(draw, (x + 80, cy + 19), label, MONO.font_variant(size=20), WHITE)
-        pill(draw, x + w - 146, cy + 14, status, (28, 47, 72), color, MONO.font_variant(size=13), pad_x=12, height=28)
-
-    draw.line((x + 30, y + 295, x + w - 30, y + 295), fill=LINE, width=1)
-    text(draw, (x + 30, y + 316), "The failure is the relationship between events.", MED.font_variant(size=17), MUTED)
-    text(draw, (x + w - 30, y + 316), "→ false-success", MONO.font_variant(size=17), RED, anchor="ra")
+def draw_outer_frame(draw: ImageDraw.ImageDraw) -> None:
+    rounded(draw, (22, 22, W - 22, H - 22), 27, fill=PAPER, outline=INK, width=11)
+    rounded(draw, (39, 39, W - 39, H - 39), 18, fill=None, outline=(91, 55, 28), width=3)
+    rounded(draw, (48, 48, W - 48, H - 48), 15, fill=None, outline=(246, 218, 167), width=2)
 
 
-def draw_signal_card(
+def draw_agent_illustration(image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+    # A deliberately simple screen-print style agent silhouette, not a detailed UI.
+    draw.ellipse((1110, 53, 1512, 455), fill=ORANGE, outline=(232, 131, 66), width=3)
+    draw.arc((1150, 95, 1470, 410), 205, 337, fill=(236, 155, 82), width=5)
+    # Hair / head.
+    draw.polygon(
+        [(1250, 122), (1282, 93), (1340, 87), (1382, 111), (1415, 145), (1390, 196), (1265, 202), (1225, 168)],
+        fill=INK,
+    )
+    draw.ellipse((1260, 132, 1398, 255), fill=CREAM)
+    draw.polygon(
+        [(1265, 148), (1237, 118), (1285, 109), (1330, 103), (1388, 120), (1407, 157),
+         (1377, 148), (1357, 130), (1304, 139)],
+        fill=INK,
+    )
+    # Face profile and neck.
+    draw.polygon([(1375, 179), (1412, 194), (1390, 210), (1373, 205)], fill=CREAM)
+    draw.rectangle((1320, 229, 1375, 274), fill=CREAM)
+    # Coat and collar.
+    draw.polygon([(1245, 270), (1326, 244), (1384, 264), (1480, 338), (1450, 455), (1168, 455), (1194, 340)], fill=NAVY)
+    draw.polygon([(1325, 248), (1270, 290), (1328, 379), (1372, 271)], fill=CREAM)
+    draw.polygon([(1380, 265), (1330, 380), (1375, 455), (1490, 455), (1460, 335)], fill=(8, 23, 35))
+    # Magnifier / signal lens.
+    draw.ellipse((1150, 316, 1234, 400), outline=CREAM, width=10)
+    draw.line((1220, 386, 1264, 430), fill=CREAM, width=11)
+    draw.ellipse((1167, 333, 1217, 383), outline=RUST, width=3)
+    draw.line((1177, 358, 1207, 358), fill=RUST, width=4)
+    # Tiny signal ticks.
+    draw.line((1118, 269, 1141, 269), fill=CREAM, width=5)
+    draw.line((1112, 285, 1141, 285), fill=CREAM, width=5)
+    draw.line((1460, 238, 1488, 238), fill=CREAM, width=5)
+    draw.line((1460, 254, 1498, 254), fill=CREAM, width=5)
+
+
+def draw_header(image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+    rounded(draw, (58, 58, W - 58, 310), 12, fill=NAVY)
+    draw.rectangle((58, 58, 1040, 310), fill=NAVY)
+    text_x = 92
+    draw.text((text_x, 85), "HERMES", font=TITLE, fill=CREAM, stroke_width=2, stroke_fill=INK)
+    draw.text((text_x, 177), "SIGNALS", font=TITLE, fill=ORANGE, stroke_width=2, stroke_fill=INK)
+    draw.text((text_x + 7, 274), "LOCAL-FIRST BEHAVIOR QUALITY FOR AI AGENTS", font=HEAD_SMALL, fill=CREAM)
+    draw_agent_illustration(image, draw)
+
+
+def draw_icon(draw: ImageDraw.ImageDraw, center: tuple[int, int], kind: str, color, dark=INK) -> None:
+    cx, cy = center
+    draw.ellipse((cx - 68, cy - 68, cx + 68, cy + 68), fill=color, outline=CREAM, width=4)
+    if kind == "false":
+        draw.line((cx - 30, cy - 26, cx + 28, cy + 30), fill=dark, width=13)
+        draw.line((cx + 28, cy - 26, cx - 30, cy + 30), fill=dark, width=13)
+        draw.line((cx - 27, cy - 44, cx + 34, cy - 44), fill=dark, width=9)
+    elif kind == "retry":
+        draw.arc((cx - 37, cy - 36, cx + 38, cy + 38), 205, 530, fill=dark, width=12)
+        draw.polygon([(cx + 30, cy - 38), (cx + 51, cy - 13), (cx + 15, cy - 14)], fill=dark)
+        draw.arc((cx - 38, cy - 38, cx + 37, cy + 38), 25, 170, fill=CREAM, width=5)
+    elif kind == "change":
+        draw.line((cx - 39, cy + 22, cx - 5, cy - 12), fill=dark, width=12)
+        draw.line((cx - 5, cy - 12, cx + 36, cy - 36), fill=dark, width=12)
+        draw.polygon([(cx + 30, cy - 52), (cx + 52, cy - 38), (cx + 34, cy - 18)], fill=dark)
+        draw.line((cx - 40, cy + 42, cx + 41, cy + 42), fill=dark, width=7)
+    elif kind == "secret":
+        draw.rounded_rectangle((cx - 39, cy - 20, cx + 40, cy + 29), radius=7, outline=dark, width=8)
+        draw.arc((cx - 20, cy - 49, cx + 20, cy - 2), 180, 360, fill=dark, width=8)
+        draw.line((cx - 24, cy + 5, cx + 24, cy + 5), fill=RED, width=9)
+        draw.line((cx - 31, cy + 15, cx + 31, cy + 15), fill=RED, width=9)
+
+
+def draw_panel(
     draw: ImageDraw.ImageDraw,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
+    box,
+    fill,
     accent,
-    number: str,
     title: str,
-    severity: str,
-    body: str,
-    evidence: str,
+    subtitle: str,
+    icon_kind: str,
+    title_fill=CREAM,
+    body_fill=CREAM,
 ) -> None:
-    rounded(draw, (x, y, x + w, y + h), radius=22, fill=PANEL, outline=(35, 61, 94), width=2)
-    draw.rectangle((x, y, x + 7, y + h), fill=accent)
-    text(draw, (x + 28, y + 28), number, MONO.font_variant(size=17), accent)
-    pill(draw, x + w - 118, y + 22, severity, (28, 47, 72), accent, MONO.font_variant(size=12), pad_x=10, height=25)
-    text(draw, (x + 28, y + 67), title, BLACK.font_variant(size=28), WHITE)
-    # Deliberately short lines for screenshot readability.
-    lines = body.split("\n")
-    for i, line in enumerate(lines):
-        text(draw, (x + 28, y + 116 + i * 27), line, MED.font_variant(size=18), MUTED)
-    draw.line((x + 28, y + h - 64, x + w - 28, y + h - 64), fill=LINE, width=1)
-    text(draw, (x + 28, y + h - 42), evidence, MONO.font_variant(size=14), SUBTLE)
+    x1, y1, x2, y2 = box
+    draw.rectangle(box, fill=fill, outline=CREAM, width=5)
+    draw_icon(draw, (x1 + 106, y1 + 94), icon_kind, accent)
+    title_font = fit_font(
+        title,
+        ["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"],
+        47,
+        x2 - x1 - 250,
+    )
+    draw.text((x1 + 195, y1 + 48), title, font=title_font, fill=title_fill)
+    draw.line((x1 + 195, y1 + 116, x2 - 42, y1 + 116), fill=accent, width=7)
+    body_font = fit_font(
+        subtitle,
+        ["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"],
+        31,
+        x2 - x1 - 242,
+    )
+    draw.text((x1 + 195, y1 + 143), subtitle, font=body_font, fill=body_fill)
+
+
+def draw_footer(draw: ImageDraw.ImageDraw) -> None:
+    y1, y2 = 960, 1140
+    draw.rectangle((58, y1, W - 58, y2), fill=NAVY, outline=CREAM, width=5)
+    draw.text((92, y1 + 27), "TRY IT ON YOUR MESSIEST TRACE", font=HEAD_SMALL, fill=ORANGE)
+    command = "hermes plugins install DECRUX9812/hermes-signals --enable"
+    command_font = fit_font(command, ["DejaVuSansMono.ttf"], 29, 1060)
+    draw.text((92, y1 + 78), command, font=command_font, fill=CREAM)
+    center_text(draw, (1340, y1 + 48), "TEST IT  ·  BREAK IT", HEAD_SMALL, CREAM)
+    center_text(draw, (1340, y1 + 92), "TELL US WHAT'S WRONG", HEAD_SMALL, ORANGE)
+    draw.text((92, y2 - 24), "github.com/DECRUX9812/hermes-signals", font=MONO_SMALL, fill=MUTED)
+    draw.text(
+        (W - 92, y2 - 24),
+        "MIT  ·  NO GPU  ·  NO API KEY  ·  NO TELEMETRY",
+        font=MONO_SMALL,
+        fill=MUTED,
+        anchor="ra",
+    )
 
 
 def main() -> None:
-    image = gradient_background()
-    glow_dot(image, (1540, 150), PURPLE, 260)
-    glow_dot(image, (190, 860), CYAN, 210)
+    image = Image.new("RGBA", (W, H), PAPER)
     draw = ImageDraw.Draw(image)
-    draw_grid(image, draw)
+    draw_outer_frame(draw)
+    draw_header(image, draw)
 
-    # Header.
-    text(draw, (90, 58), "HERMES SIGNALS  /  OPEN SOURCE PLUGIN", MONO.font_variant(size=17), CYAN)
-    pill(draw, 1395, 44, "NO GPU  ·  NO API KEY", (25, 54, 83), CYAN, MONO.font_variant(size=13), pad_x=14, height=30)
-
-    text(draw, (90, 116), "Catch the failure", BLACK.font_variant(size=76), WHITE)
-    text(draw, (90, 198), "before it becomes fact.", BLACK.font_variant(size=76), CYAN)
-    text(draw, (95, 302), "A local-first quality layer for AI agents.", MED.font_variant(size=28), MUTED)
-    text(
+    grid_left, grid_top = 58, 330
+    grid_right, grid_bottom = W - 58, 930
+    mid_x = (grid_left + grid_right) // 2
+    mid_y = (grid_top + grid_bottom) // 2
+    draw_panel(
         draw,
-        (95, 347),
-        "Deterministic filters turn messy traces into reviewable signals.",
-        REG.font_variant(size=22),
-        MUTED,
-    )
-
-    draw_trace_panel(draw)
-
-    # Architecture strip.
-    x, y, w, h = 90, 450, 1620, 96
-    rounded(draw, (x, y, x + w, y + h), radius=18, fill=(11, 25, 46), outline=(33, 63, 98), width=2)
-    text(draw, (x + 30, y + 18), "THE LOOP", MONO.font_variant(size=14), SUBTLE)
-    steps = [
-        ("01", "cheap deterministic filter", CYAN),
-        ("02", "compact evidence", PURPLE),
-        ("03", "human review", GREEN),
-    ]
-    sx = x + 205
-    for i, (num, label, color) in enumerate(steps):
-        text(draw, (sx, y + 48), num, MONO.font_variant(size=15), color, anchor="lm")
-        text(draw, (sx + 39, y + 48), label, MED.font_variant(size=21), WHITE, anchor="lm")
-        if i < len(steps) - 1:
-            draw.line((sx + 300, y + 48, sx + 347, y + 48), fill=LINE, width=2)
-            draw.polygon([(sx + 347, y + 48), (sx + 336, y + 41), (sx + 336, y + 55)], fill=LINE)
-        sx += 470
-
-    # Signal cards.
-    card_y = 578
-    card_w = 375
-    gap = 40
-    draw_signal_card(
-        draw,
-        90,
-        card_y,
-        card_w,
-        286,
+        (grid_left, grid_top, mid_x, mid_y),
+        BLUE,
         RED,
-        "01",
         "FALSE SUCCESS",
-        "HIGH",
-        "Claims completion\nafter tool failure.",
-        "failed result + success claim",
+        "tool failed  →  agent says DONE",
+        "false",
     )
-    draw_signal_card(
+    draw_panel(
         draw,
-        90 + card_w + gap,
-        card_y,
-        card_w,
-        286,
-        AMBER,
-        "02",
+        (mid_x, grid_top, grid_right, mid_y),
+        RUST,
+        CREAM,
         "RETRY LOOP",
-        "MEDIUM",
-        "Repeats the same\nfailing strategy.",
-        "same tool + same args",
+        "same action  →  same failure",
+        "retry",
+        title_fill=CREAM,
+        body_fill=CREAM,
     )
-    draw_signal_card(
+    draw_panel(
         draw,
-        90 + 2 * (card_w + gap),
-        card_y,
-        card_w,
-        286,
-        PURPLE,
-        "03",
+        (grid_left, mid_y, mid_x, grid_bottom),
+        NAVY,
+        ORANGE,
         "UNVERIFIED CHANGE",
-        "MEDIUM",
-        "Reports a change\nwithout verification.",
-        "mutation − test/readback",
+        "changed  ≠  verified",
+        "change",
     )
-    draw_signal_card(
+    draw_panel(
         draw,
-        90 + 3 * (card_w + gap),
-        card_y,
-        card_w,
-        286,
-        GREEN,
-        "04",
+        (mid_x, mid_y, grid_right, grid_bottom),
+        OLIVE,
+        CREAM,
         "SECRET RISK",
-        "CRITICAL",
-        "Finds credential-like\nmaterial. Redacts output.",
-        "local signal · no raw secret",
+        "finds it  +  redacts it",
+        "secret",
+        title_fill=CREAM,
+        body_fill=CREAM,
     )
 
-    # Footer / CTA.
-    draw.line((90, 905, 1710, 905), fill=(35, 61, 94), width=2)
-    text(draw, (90, 930), "TEST IT  ·  BREAK IT  ·  TELL US WHAT'S WRONG", MONO.font_variant(size=16), CYAN)
-    text(draw, (1710, 930), "github.com/DECRUX9812/hermes-signals", MONO.font_variant(size=16), MUTED, anchor="ra")
-    text(
-        draw,
-        (90, 970),
-        "hermes plugins install DECRUX9812/hermes-signals --enable",
-        MONO.font_variant(size=18),
-        WHITE,
-    )
-    text(draw, (1710, 970), "MIT  ·  LOCAL-FIRST  ·  v0.1", MONO.font_variant(size=14), SUBTLE, anchor="ra")
+    draw_footer(draw)
+    add_texture(image)
 
+    # Slightly soften the printed edges like the supplied poster references.
+    image = image.convert("RGB").filter(ImageFilter.GaussianBlur(0.18))
     image.save(OUT, format="PNG", optimize=True)
     print(OUT)
 
