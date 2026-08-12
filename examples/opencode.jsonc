@@ -3,7 +3,10 @@
   "mcp": {
     "hermes-signals": {
       "type": "local",
-      "command": ["hermes-signals-mcp"],
+      // After: pip install 'hermes-signals[mcp]'  →  "command": ["hermes-signals-mcp"]
+      // Verified alternative that needs no install (uv + repo checkout):
+      "command": ["uv", "run", "--with", "mcp", "python", "-m", "hermes_signals.mcp_server"],
+      "cwd": "/path/to/hermes-signals",
       "enabled": true
     }
   }
