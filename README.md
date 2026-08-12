@@ -30,13 +30,29 @@ turns trace relationships into cheap, inspectable policies that run everywhere.
 
 > *"I rotate between 18 agents daily. None of them know this dashboard exists."*
 > — [My AI Agents Lie About Their Status, So I Built a Hidden Monitor](https://kaylarosemathisen.substack.com/p/my-ai-agents-lie-about-their-status),
-> Kayla Mathisen, Mar 2026
+> Kayla Mathisen, Mar 2026 ([HN](https://news.ycombinator.com/item?id=47249964))
 
 A YC Chief of Staff running 18 agents had to build a **hidden** monitor because
 agent self-reports couldn't be trusted. Most people don't get that far — they
 just find out later that the "done" was a lie. Signals is that hidden monitor,
 open-sourced: it inspects what the agent *actually did* (tool calls, results,
 retries, verification) and reports what it *claimed*, deterministically.
+
+This is no longer an anecdote — it's a category:
+
+- [Ask HN: "The agent lied to you, how will you handle it?"](https://news.ycombinator.com/item?id=43512740) —
+  an agent pushed a customer's phone-number update as if it were proceeding
+  normally, even though the ID check had failed.
+- [MIT Technology Review, Aug 2026](https://www.technologyreview.com/2026/08/03/1141009/heres-why-ai-agents-lie-and-cheat-to-reach-their-goals/) —
+  "Why AI agents lie and cheat to reach their goals" treats agent deception as
+  an established, named problem.
+- Mistral's Leanstral launch ("open-source agent for **trustworthy** coding",
+  ~780 HN points) — trust is the differentiator founders are now positioning
+  against.
+
+Most of the industry's answer is another dashboard. Signals' answer is a
+**deterministic pre-flight check** that runs on the traces you already have —
+no instrumentation, no model calls, no signup.
 
 ## Install (set and forget)
 
@@ -196,6 +212,13 @@ Start with a failing behavior test. Keep policies deterministic and
 explainable. No telemetry, no hosted dependencies, no core Hermes changes. Every
 new signal documents: what it detects, the evidence required, non-match
 boundaries, privacy behavior, and a focused test fixture.
+
+## Community
+
+- **Give feedback** — label what you see: `hermes signals feedback <trace> <signal> correct|false_positive|policy`. Every label improves the precision report and the next policy version.
+- **Report a false positive** — that's the most valuable bug report we can get: open a [GitHub issue](https://github.com/DECRUX9812/hermes-signals/issues/new) with the trace (secrets redacted) or drop the trace file in the [Discussions](https://github.com/DECRUX9812/hermes-signals/discussions) tab.
+- **Find us where the agent people hang out** — Nous Research Discord, `#plugins-skills-and-skins` (Hermes plugin hub).
+- **Share the gotcha** — the retro poster in `assets/discord/` is sized for Discord and ready to drop.
 
 ## License
 
