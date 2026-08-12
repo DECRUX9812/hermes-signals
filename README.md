@@ -99,6 +99,23 @@ for signal in signals:
     print(signal.signal_id, signal.severity)
 ```
 
+## Run in any harness (MCP)
+
+Signals also ships as a **Model Context Protocol (MCP) server**, so the same
+`scan_trace`, `scan_trace_file`, and `demo` tools work in any MCP-capable
+harness — OpenCode, Vercel AI SDK, Claude Desktop, Cursor, VS Code, ChatGPT, or
+Hermes' own native MCP client.
+
+```bash
+pip install 'hermes-signals[mcp]'
+hermes-signals-mcp            # stdio (default)
+hermes-signals-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+OpenCode: add an `mcp` block to `opencode.json` (see `examples/opencode.jsonc`).
+Vercel AI SDK: connect with `createMCPClient` over stdio (local) or Streamable
+HTTP (deployed). Full wiring is in `docs/integration.md`.
+
 ## Signal catalog
 
 | Signal | Severity | Match policy | Why it matters |

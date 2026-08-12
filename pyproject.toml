@@ -29,9 +29,13 @@ dev = [
   "pytest>=8,<9",
   "ruff>=0.8,<1",
 ]
+mcp = [
+  "mcp>=2.0.0,<3",
+]
 
 [project.scripts]
 hermes-signals = "hermes_signals.cli:main"
+hermes-signals-mcp = "hermes_signals.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["hermes_signals*"]

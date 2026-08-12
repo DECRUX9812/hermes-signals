@@ -56,6 +56,93 @@ for path in Path("traces").glob("*.json"):
 Keep evaluation corpora local if they contain user data. Do not commit raw
 transcripts or credentials to this repository.
 
+## Run in any harness (Model Context Protocol)
+
+Signals ships an **MCP server** so the same three tools are available to any
+harness that speaks the Model Context Protocol — Hermes Agent, OpenCode, Vercel
+AI SDK, Claude Desktop, Cursor, VS Code, ChatGPT, and others.
+
+Install the optional dependency once:
+
+```bash
+pip install 'hermes-signals[mcp]'
+# or with uv:  uv tool install 'hermes-signals[mcp]'
+```
+
+Run it over **stdio** (the default, for local tools):
+
+```bash
+hermes-signals-mcp
+```
+
+The server exposes:
+
+| Tool | Purpose |
+|---|---|
+| `scan_trace` | Classify a JSON trace envelope (string) and return signals |
+| `scan_trace_file` | Classify a trace JSON file on disk |
+| `demo` | Run the built-in false-success example |
+
+All responses are deterministic, bounded, and redacted: the classifier never
+returns raw conversation text or suspected secrets.
+
+### OpenCode
+
+OpenCode loads MCP servers from `opencode.json` / `opencode.jsonc`. Point the
+`mcp` block at the server command (see `examples/opencode.jsonc`):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "hermes-signals": {
+      "type": "local",
+      "command": ["hermes-signals-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+OpenCode automatically exposes the `scan_trace`, `scan_trace_file`, and `demo`
+tools to the model alongside its built-ins. For a per-project install, drop the
+same block into `.opencode/` config. (OpenCode also supports native JS/TS hook
+plugins via `tool.execute.after`; the MCP route is the recommended, no-code
+path.)
+
+### Vercel AI SDK
+
+Vercel's AI SDK connects to any MCP server through `createMCPClient`. For a
+local server use **stdio**; for a deployed instance use **Streamable HTTP**:
+
+```ts
+import { createMCPClient } from "@ai-sdk/mcp";
+import { generateText } from "ai";
+
+const mcp = createMCPClient({
+  transport: { type: "stdio", command: "hermes-signals-mcp" },
+});
+
+const { text } = await generateText({
+  model: yourModel,
+  tools: await mcp.tools(),
+  prompt: "scan this agent trace and report any quality signals:\n" + traceJson,
+});
+
+await mcp.close();
+```
+
+For a remote deployment use Streamable HTTP (`transport: { type: "http",
+url: "https://your-host/mcp" }`). See the
+[AI SDK MCP docs](https://ai-sdk.dev/docs/ai-sdk-core/mcp-tools).
+
+### Other clients
+
+Any MCP-capable client can connect over stdio: `uvx hermes-signals[mcp]` (or
+`hermes-signals-mcp`) launches a local server that Claude Desktop, Cursor, VS
+Code, and ChatGPT can be pointed at. No network, model, or GPU is used at any
+step.
+
 ## Future Discord reporting
 
 A Discord reporter can be built as a separate optional integration, but it
