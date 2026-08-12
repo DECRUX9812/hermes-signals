@@ -1,0 +1,10 @@
+{
+  "name": "quiet",
+  "version": 1,
+  "description": "Example policy pack: tune severity and silence noisy signals without forking code.",
+  "policies": [
+    {"signal_id": "secret-risk", "severity": "low"},
+    {"signal_id": "retry-loop", "suppress": true},
+    {"signal_id": "subagent-handoff-loss", "suppress_when": ["subagent_tool=codex"]}
+  ]
+}

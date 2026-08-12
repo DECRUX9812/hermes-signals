@@ -42,8 +42,8 @@ def register(ctx) -> None:
     if arm_if_needed():
         logger.info(
             "Hermes Signals armed — monitoring this session's tool calls. "
-            "Run `hermes signals demo` for a sample, or `hermes signals backfill` "
-            "to build a report from existing session history."
+            "Run `hermes signals setup` once to backfill history and install the "
+            "weekly digest, or `hermes signals demo` for a sample trace."
         )
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_cli_command(

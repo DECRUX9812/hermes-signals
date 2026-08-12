@@ -31,6 +31,15 @@ class CorpusResult:
 
 
 def _default_corpus_dir() -> Path:
+    """Locate the shipped corpus: package data in wheels, repo dir in checkouts."""
+    try:
+        import importlib.resources
+
+        ref = importlib.resources.files("hermes_signals").joinpath("corpus")
+        if ref.is_dir():
+            return Path(str(ref))
+    except (ImportError, AttributeError, OSError):
+        pass
     return Path(__file__).resolve().parent.parent / "corpus"
 
 

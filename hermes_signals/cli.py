@@ -12,9 +12,10 @@ from hermes_signals.backfill import backfill_sources
 from hermes_signals.classifier import classify_trace, stable_trace_id
 from hermes_signals.corpus import corpus_summary, run_corpus
 from hermes_signals.digest import build_digest_markdown, cron_install
+from hermes_signals.doctor import run_doctor
 from hermes_signals.escalate import escalate_signals, resolve_escalation_config
 from hermes_signals.packs import apply_pack, installed_packs, load_pack
-from hermes_signals.status import status_report
+from hermes_signals.status import arm_if_needed, status_report
 from hermes_signals.store import precision_report, record_feedback
 
 _DEMO_TRACE: dict[str, Any] = {
@@ -178,6 +179,23 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     corpus.add_argument("--dir", default=None, help="Corpus directory (default: shipped corpus/)")
 
     subs.add_parser("packs", help="List installed policy packs")
+
+    setup = subs.add_parser(
+        "setup",
+        help="One-shot install: backfill history, arm monitoring, install the weekly digest",
+    )
+    setup.add_argument(
+        "--source",
+        action="append",
+        choices=("hermes", "opencode", "claude"),
+        help="Store to backfill (repeatable; default: hermes)",
+    )
+    setup.add_argument("--max-sessions", type=int, default=100)
+    setup.add_argument("--no-backfill", action="store_true", help="Skip the history backfill")
+    setup.add_argument("--no-cron", action="store_true", help="Skip installing the weekly digest cron")
+    setup.add_argument("--dry-run", action="store_true", help="Print the plan without changing anything")
+
+    subs.add_parser("doctor", help="Self-check: store, corpus, escalation, digest cron")
     subparser.set_defaults(func=signals_command)
 
 
@@ -275,6 +293,10 @@ def signals_command(args: argparse.Namespace) -> int:
             version = f"v{pack['version']}" if pack.get("version") else "unversioned"
             print(f"{pack['name']} ({version}) — {pack['path']}")
         return 0
+    if action == "setup":
+        return _run_setup(args)
+    if action == "doctor":
+        return _run_doctor()
     if action == "demo":
         trace = _DEMO_TRACE
     else:
@@ -295,6 +317,83 @@ def signals_command(args: argparse.Namespace) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         _print_text(payload)
+    return 0
+
+
+def _run_setup(args: argparse.Namespace) -> int:
+    """One-shot set-and-forget install: arm, backfill history, weekly digest."""
+    if args.dry_run:
+        print("setup plan (dry run — nothing changed):")
+        print("  1. arm monitoring (one-time marker under HERMES_HOME)")
+        if not args.no_backfill:
+            sources = args.source or ["hermes"]
+            print(
+                f"  2. backfill {', '.join(sources)} "
+                f"(max {args.max_sessions} sessions per source)"
+            )
+        if not args.no_cron:
+            print("  3. install weekly digest cron (Sundays 09:00 · no-agent · local delivery)")
+        print("  4. print status report")
+        return 0
+
+    if arm_if_needed():
+        print("✅ armed — monitoring this Hermes install from now on")
+    else:
+        print("ℹ️  already armed (monitoring active)")
+
+    if not args.no_backfill:
+        sources = args.source or ["hermes"]
+        summary = backfill_sources(sources, max_sessions=args.max_sessions)
+        for source, stats in summary.items():
+            print(
+                f"   backfill {source:<8} scanned={stats['sessions_scanned']:<4} "
+                f"signals={stats['signals_recorded']:<3} dupes={stats['skipped_duplicates']}"
+            )
+
+    if not args.no_cron:
+        result = cron_install()
+        if result["installed"]:
+            verb = "already installed" if result.get("already") else "installed"
+            print(f"✅ weekly digest cron {verb} (job {result['job_id']})")
+        else:
+            print(f"⚠ could not register cron: {result.get('error')}")
+            print(f"  run manually: {result['manual']}")
+
+    report = status_report()
+    print(f"\nHermes Signals v{report['version']} — {'ARMED' if report['armed'] else 'not armed'}")
+    print(f"signals recorded:  {report['signals_recorded']}  ({report['signals_store']})")
+    esc = report["escalation"]
+    print(
+        f"escalation:       {esc['mode']}"
+        + (f" ({esc.get('model')} @ {esc.get('base_url')})" if esc.get("model") else "")
+    )
+    print()
+    print("You're set. From now on:")
+    print("  · every Hermes turn is scanned locally — zero model calls, zero telemetry")
+    print("  · the weekly digest lands on its own (Sundays)")
+    print(
+        "  · label what you see: hermes signals feedback <trace> <signal> "
+        "correct|false_positive|policy"
+    )
+    print("  · anytime: hermes signals doctor · hermes signals report · hermes signals digest")
+    return 0
+
+
+def _run_doctor() -> int:
+    """Print the self-check table; fail only on required checks."""
+    checks = run_doctor()
+    failed = 0
+    for check in checks:
+        marker = "✓" if check.ok else "✗"
+        tag = "" if check.required else " (optional)"
+        print(f"{marker} {check.name:<12} {check.detail}{tag}")
+        if check.required and not check.ok:
+            failed += 1
+    print()
+    if failed:
+        print(f"doctor: {failed} required check(s) failed — run `hermes signals setup` to repair")
+        return 1
+    print("doctor: all required checks pass")
     return 0
 
 

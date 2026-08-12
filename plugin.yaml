@@ -1,5 +1,5 @@
 name: hermes-signals
-version: 0.1.0
+version: 0.4.1
 description: >
   Local-first deterministic behavior-quality signals for Hermes Agent.
   Detect false success, retry loops, unverified changes, and credential-like

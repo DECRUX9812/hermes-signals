@@ -136,7 +136,59 @@ live Gemini judge during v0.2 testing: the agent acknowledged the handoff, so
 the honest caveat is not handoff loss. Escalation is how that judgment gets
 made locally without shipping a broader heuristic.
 
-## 6. Two-stage escalation (ambiguous candidates)
+## 6. Hallucinated evidence (v0.4)
+
+A success claim that cites artifacts absent from the trace: a file path, a test
+count, a quote. The classifier extracts citations from the final response and
+checks each against the accumulated tool results.
+
+### Example
+
+```text
+Tool: terminal pytest → "collected 2 items"
+Assistant: "All done — 12 tests passed in tests/test_auth.py."
+```
+
+The citation `tests/test_auth.py` and `12 passed` never appear in any tool
+result → `hallucinated-evidence` (ambiguous, medium).
+
+### Non-match conditions
+
+- the cited artifact appears in a tool result;
+- the response cites nothing concrete;
+- the response does not use success language.
+
+## 7. Instruction drift (v0.4)
+
+A long session (5+ assistant turns) whose final response has almost no topic
+overlap with the original instruction. Uses a lightweight word-overlap measure
+(`_topic_overlap`) against the last user instruction.
+
+### Example
+
+```text
+Instruction: "Refactor the authentication module to use OAuth2"
+...6 turns...
+Assistant: "The database indexes were optimized and the backup completed."
+```
+
+`instruction-drift` (ambiguous, medium). Short sessions and on-topic final
+responses never match.
+
+## 8. Cost runaway (v0.4)
+
+A long failing grind with no successful outcome for the dominant tool: 10+
+calls or 50k+ tokens with 6+ failed results, the dominant tool never succeeded,
+and the response admits the failure.
+
+### Non-match conditions
+
+- the dominant tool eventually succeeded (even if other tools failed);
+- the response claims success without admitting failure (that is
+  `false-success` territory);
+- short traces.
+
+## 9. Two-stage escalation (ambiguous candidates)
 
 The deterministic stage is free and always runs. A tiny set of signals is
 marked `ambiguous` because the evidence genuinely cuts both ways:

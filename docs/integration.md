@@ -12,21 +12,61 @@ python -m hermes_signals.cli scan trace.json --output json > signals.json
 A zero-signal result is still a successful scan. The CLI returns exit code 2
 only when the input file cannot be read or is not a JSON object.
 
-### Two-stage escalation (v0.2)
+### Two-stage escalation (v0.2+)
 
-`--escalate` confirms `ambiguous` candidates with a cheap model. Config comes
-from the environment:
+`--escalate` confirms `ambiguous` candidates with a cheap model. Configuration
+is **auto-discovered** — nothing to set up. Resolution order:
+
+1. explicit env vars (`HERMES_SIGNALS_ESCALATION_BASE_URL` / `_MODEL` /
+   `_API_KEY`);
+2. Hermes `config.yaml` — an explicit `base_url`, or any registered provider
+   (opencode-go, openrouter, gemini, …) resolved through Hermes' provider
+   registry, with keys from `.env`/`auth.json`;
+3. a local endpoint (Ollama keyless; CLIProxy when a key exists);
+4. any catalog provider with a key in `.env` (OpenRouter, DashScope, …).
 
 ```bash
-export HERMES_SIGNALS_ESCALATION_BASE_URL=http://127.0.0.1:8317/v1
-export HERMES_SIGNALS_ESCALATION_MODEL=gemini-3.6-flash-high
-export HERMES_SIGNALS_ESCALATION_API_KEY=your-key
-hermes-signals scan trace.json --escalate --strategy-sensitive
+hermes-signals scan trace.json --escalate --strategy-sensitive   # zero config
 ```
 
-Only ambiguous signals are sent (compact, redacted excerpt). Verdicts appear
-as `[CONFIRMED]` / `[REJECTED]` / `[UNCONFIRMED]`. Escalation is off by default
-and never raises.
+`hermes signals status` / `hermes signals doctor` show which mode is active
+(`env | hermes | local | env-provider | off`). Only ambiguous signals are sent
+(compact, redacted excerpt). Verdicts appear as `[CONFIRMED]` / `[REJECTED]` /
+`[UNCONFIRMED]`. Escalation is off by default and never raises. Rejects get an
+adversarial double-check so a single bad call cannot veto a real signal.
+
+### Set-and-forget (v0.4)
+
+```bash
+hermes signals setup     # one-shot: arm + backfill + weekly digest cron + status
+hermes signals doctor    # self-check: store, corpus, escalation, digest cron
+```
+
+`setup` is idempotent (re-running never duplicates the cron job) and safe on a
+fresh install (a missing session DB backfills as zero, never an error).
+
+### Backfill (v0.3+)
+
+Classify sessions you already have — no instrumentation needed:
+
+```bash
+hermes-signals backfill                          # hermes + opencode + claude
+hermes-signals backfill --source opencode --max-sessions 50
+```
+
+Reads Hermes `state.db`, OpenCode `opencode.db`, and Claude Desktop JSONL
+read-only, bounded, idempotently.
+
+### Policy packs & regression corpus (v0.4)
+
+```bash
+hermes-signals scan trace.json --pack examples/packs/quiet.json
+hermes-signals packs                            # list installed packs
+hermes-signals corpus                           # labeled regression yardstick
+```
+
+Packs are local JSON/YAML severity/suppress overrides; the corpus ships with
+the package and CI enforces it on every push.
 
 ### Feedback & precision (v0.3)
 

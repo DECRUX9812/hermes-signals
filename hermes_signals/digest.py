@@ -171,7 +171,12 @@ def cron_install(
     hermes_home: str | Path | None = None,
     schedule: str = "0 9 * * 0",
 ) -> dict[str, Any]:
-    """Best-effort register a weekly no-agent digest cron job in Hermes."""
+    """Best-effort register a weekly no-agent digest cron job in Hermes.
+
+    Idempotent: when a job named ``signals-weekly-digest`` already exists the
+    stored script is refreshed and the existing job is reported — never a
+    duplicate. On non-Hermes installs the helper prints the manual command.
+    """
     home = _home(hermes_home)
     scripts_dir = home / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +185,13 @@ def cron_install(
     try:
         from cron.jobs import create_job
 
+        existing = digest_cron_status(hermes_home=home)
+        if existing:
+            return {
+                "installed": True,
+                "job_id": existing["job_id"],
+                "already": True,
+            }
         job = create_job(
             prompt="",
             schedule=schedule,
@@ -188,7 +200,7 @@ def cron_install(
             script="signals-weekly-digest.py",
             no_agent=True,
         )
-        return {"installed": True, "job_id": str(job.get("id", ""))}
+        return {"installed": True, "job_id": str(job.get("id", "")), "already": False}
     except Exception as exc:  # pragma: no cover - depends on Hermes presence
         return {
             "installed": False,
@@ -198,3 +210,25 @@ def cron_install(
                 "--no-agent --script signals-weekly-digest.py"
             ),
         }
+
+
+def digest_cron_status(
+    *,
+    hermes_home: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Return ``{job_id, enabled}`` when the weekly digest cron is installed."""
+    try:
+        from cron.jobs import list_jobs
+    except Exception:  # pragma: no cover - depends on Hermes presence
+        return None
+    try:
+        jobs = list_jobs(include_disabled=True)
+    except Exception:  # pragma: no cover - store may be absent
+        return None
+    for job in jobs:
+        if str(job.get("name", "")) == "signals-weekly-digest":
+            return {
+                "job_id": str(job.get("id", "")),
+                "enabled": bool(job.get("enabled", True)),
+            }
+    return None

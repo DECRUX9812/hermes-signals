@@ -1,287 +1,201 @@
 # Hermes Signals
 
+> **Your agent says "done." Is it lying?**
+
 [![Tests](https://github.com/DECRUX9812/hermes-signals/actions/workflows/ci.yml/badge.svg)](https://github.com/DECRUX9812/hermes-signals/actions/workflows/ci.yml)
+[![Corpus](https://github.com/DECRUX9812/hermes-signals/actions/workflows/signals-review.yml/badge.svg)](https://github.com/DECRUX9812/hermes-signals/actions/workflows/signals-review.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Hermes Agent](https://img.shields.io/badge/Hermes%20Agent-plugin-8A2BE2)](https://github.com/NousResearch/hermes-agent)
+[![No API key](https://img.shields.io/badge/no%20API%20key-required-00C853.svg)](README.md)
+[![No telemetry](https://img.shields.io/badge/no%20telemetry-ever-00C853.svg)](README.md)
 
-**Local-first behavior quality signals for Hermes Agent.**
-
-Hermes Signals detects a small set of high-value agent failure patterns from
-existing traces:
-
-- 🔴 **False success** — the agent claims an operation completed after tool failure.
-- 🟠 **Retry loop** — the agent repeats the same failing operation without changing strategy.
-- 🟠 **Unverified change** — the agent reports a file change without visible test, readback, or build evidence.
-- 🟣 **Secret risk** — credential-like material appeared in a trace event; output is redacted.
-
-It is deliberately small and boring at runtime: **pure Python, deterministic,
-local-only, no GPU, no hosted service, no model call, and no outbound telemetry.**
-
-> Signals is a diagnostic layer, not an autonomous judge. A match is a useful
-> review candidate—not proof that an agent failed.
-
-## Why this exists
-
-Agent failures are often relationships between events rather than one bad
-message. For example:
+**Hermes Signals is a local-first, deterministic quality layer for AI agents.** It
+catches the failures agents are really bad at reporting — claiming success after
+a tool failed, repeating the same broken action forever, editing files without
+verifying them, leaking credentials, losing subagent results — **without a
+single model call, GPU, API key, or byte of outbound telemetry.**
 
 ```text
-update_record(...) → timeout
-update_record(...) → timeout
-final answer: “The record was successfully updated.”
+update_record(id=42)  →  TIMEOUT
+update_record(id=42)  →  TIMEOUT
+final answer: "The record was successfully updated."   ← 🔴 false-success
 ```
 
-A single event does not contain the whole failure. The useful unit is the
-trace: tool calls, results, retries, verification, and the final claim.
+A single event never contains the whole failure. The **trace** does. Signals
+turns trace relationships into cheap, inspectable policies that run everywhere.
 
-Hermes Signals turns those relationships into cheap, inspectable policies that
-can run across every Hermes installation. It follows a simple production
-pattern:
+> Signals is a diagnostic layer, not an autonomous judge. A match is a useful
+> review candidate — not proof that an agent failed.
+
+## The problem is real
+
+> *"I rotate between 18 agents daily. None of them know this dashboard exists."*
+> — [My AI Agents Lie About Their Status, So I Built a Hidden Monitor](https://kaylarosemathisen.substack.com/p/my-ai-agents-lie-about-their-status),
+> Kayla Mathisen, Mar 2026
+
+A YC Chief of Staff running 18 agents had to build a **hidden** monitor because
+agent self-reports couldn't be trusted. Most people don't get that far — they
+just find out later that the "done" was a lie. Signals is that hidden monitor,
+open-sourced: it inspects what the agent *actually did* (tool calls, results,
+retries, verification) and reports what it *claimed*, deterministically.
+
+## Install (set and forget)
+
+```bash
+hermes plugins install DECRUX9812/hermes-signals --enable
+hermes signals setup
+```
+
+That's it. `setup` arms monitoring, backfills your recent session history into
+the first report (so it's about **your** agents, not a demo), installs a weekly
+digest cron, and prints a status summary. You never touch it again:
+
+- every Hermes turn is scanned locally after it completes — zero model calls
+- a weekly digest lands on its own (numbers only, no raw content)
+- label what you see and precision improves over time:
+  `hermes signals feedback <trace> <signal> correct|false_positive|policy`
+
+```bash
+hermes signals demo      # prove it works in 2 seconds
+hermes signals doctor    # self-check: store, corpus, escalation, cron
+hermes signals report    # per-signal precision from your labels
+hermes signals digest    # the weekly report, on demand
+```
+
+Remove it any time: `hermes plugins disable hermes-signals`.
+
+![Hermes Signals — launch poster](assets/discord/hermes-signals-discord.png)
+
+## What it catches
+
+| Signal | Severity | Detects |
+|---|---:|---|
+| 🔴 `false-success` | high | Claims completion after failed tool results |
+| 🟠 `retry-loop` | medium | Same tool + same args, failing, no strategy change |
+| 🟠 `unverified-change` | medium | Reports a change with no test/readback/build evidence |
+| 🟣 `secret-risk` | critical | Credential-like material in a trace (output redacted) |
+| 🟠 `subagent-handoff-loss` | medium | Delegated work succeeded but the result was abandoned |
+| 🟠 `hallucinated-evidence` | medium | Success claim cites artifacts absent from the trace |
+| 🟠 `instruction-drift` | medium | Long session whose final answer left the topic |
+| 🟠 `cost-runaway` | medium | Long failing grind, no successful outcome, admitted failure |
+
+Every signal ships with compact evidence (counts and booleans — never raw
+content) and a versioned behavior test. Policies intentionally prefer **false
+negatives over noisy alerts**.
+
+## How it works
 
 ```text
 cheap deterministic filter → compact evidence → human review
 ```
 
-A future version may add an optional classifier for ambiguous candidates. The
-current version does not need an API key or an inference backend.
+1. **Stage 1 — deterministic** (always, free, instant): pattern-match the trace
+   against the signal policies. No model, no network, no GPU.
+2. **Stage 2 — optional judge** (only for *ambiguous* candidates): a cheap model
+   confirms or rejects, batched per trace, with an adversarial double-check on
+   rejects so one bad call can't veto a real signal.
+3. **Human review**: feedback labels (✅ correct / ❌ false_positive / 🛠️ policy)
+   drive the precision report. Model calls scale with **uncertainty**, not traffic.
 
-## Install as a Hermes plugin
+The judge auto-discovers whatever your machine already has — **zero setup**:
 
-Hermes plugins are opt-in. Install the repository and enable it:
+- Hermes config provider (opencode-go, openrouter, gemini, … resolved through
+  Hermes' own provider registry; keys from `.env`/`auth.json`)
+- a local endpoint (Ollama keyless, CLIProxy with an existing key)
+- any catalog provider with a key in `.env` (OpenRouter, DashScope, …)
 
-```bash
-hermes plugins install DECRUX9812/hermes-signals --enable
-hermes signals demo
-```
+Prefer local first, fall back gracefully; escalation is off by default and
+never raises.
 
-The plugin observes completed turns through Hermes' `post_llm_call` hook and
-writes bounded metadata to the active profile's local store:
+## Why not LangSmith / Langfuse / AgentOps / Phoenix?
 
-```text
-$HERMES_HOME/signals.jsonl
-```
+The observability giants are **runtime instrumentation + hosted dashboards +
+LLM-as-judge evals**. That's a different job: tracing what your agent does live,
+at scale, in a team dashboard. Signals occupies the corner they don't:
 
-Signals never stores raw conversation text, raw tool arguments, or raw tool
-results in that report file. A classifier exception is fail-open and cannot
-break the Hermes agent loop.
+| | Signals | LangSmith / Langfuse / AgentOps | Arize Phoenix |
+|---|---|---|---|
+| Detection style | **Deterministic rules** | LLM-judge evals (mostly) | LLM-judge evals (mostly) |
+| Integration | **None** — reads existing traces | SDK wrapper around the LLM call | SDK / OTel instrumentation |
+| Works on old sessions | **Yes — backfill** (`state.db`, OpenCode, Claude JSONL) | No — needs instrumentation first | No |
+| Hosted / API key | **No — local file** | Yes | Self-hosted service |
+| Cost | **$0, always** | Per-token evals / seats | Infrastructure + model evals |
+| Telemetry | **Zero outbound** | Trace upload by design | Self-hosted |
+| Failure-mode signals (false-success, retry-loop, …) | **Built-in, 8 signals** | Bring-your-own evaluator | Bring-your-own evaluator |
 
-Disable or remove it at any time:
+Signals is the *pre-flight check* layer: cheap, local, deterministic, and it
+works on traces you already have — no SDK changes, no migration, no signup.
 
-```bash
-hermes plugins disable hermes-signals
-hermes plugins remove hermes-signals
-```
+## Works in any harness
 
-## Use standalone
-
-The classifier has no Hermes runtime dependency. Clone the repo and run:
-
-```bash
-python -m hermes_signals.cli demo
-python -m hermes_signals.cli demo --output json
-python -m hermes_signals.cli scan examples/false-success.json
-```
-
-Or use it as a library:
-
-```python
-from hermes_signals import classify_trace
-
-signals = classify_trace({
-    "events": [
-        {"type": "tool_call", "id": "1", "name": "deploy", "arguments": {}},
-        {"type": "tool_result", "tool_call_id": "1", "status": "timeout"},
-        {"type": "assistant", "content": "Deployment completed successfully."},
-    ]
-})
-
-for signal in signals:
-    print(signal.signal_id, signal.severity)
-```
-
-## Run in any harness (MCP)
-
-Signals also ships as a **Model Context Protocol (MCP) server**, so the same
-`scan_trace`, `scan_trace_file`, and `demo` tools work in any MCP-capable
-harness — OpenCode, Vercel AI SDK, Claude Desktop, Cursor, VS Code, ChatGPT, or
-Hermes' own native MCP client.
+- **Hermes plugin** — observes completed turns via `post_llm_call`
+- **CLI** — `hermes signals scan trace.json`, or standalone:
+  `python -m hermes_signals.cli scan trace.json`
+- **MCP server** — `scan_trace`, `scan_trace_file`, `feedback`, `precision` for
+  any MCP-capable harness (OpenCode, Cursor, VS Code, Claude Desktop, …)
+- **Library** — `from hermes_signals import classify_trace`
 
 ```bash
 pip install 'hermes-signals[mcp]'
 hermes-signals-mcp            # stdio (default)
-hermes-signals-mcp --transport streamable-http --host 0.0.0.0 --port 8000
 ```
 
-OpenCode: add an `mcp` block to `opencode.json` (see `examples/opencode.jsonc`).
-Vercel AI SDK: connect with `createMCPClient` over stdio (local) or Streamable
-HTTP (deployed). Full wiring is in `docs/integration.md`.
-
-## Signal catalog
-
-| Signal | Severity | Match policy | Why it matters |
-|---|---:|---|---|
-| `false-success` | high | Failed tool result(s), no successful result, success language, and no failure admission in the final response | Prevents silent lies about writes, deployments, records, and deliveries |
-| `retry-loop` | medium | At least two failed calls with the same tool name and canonicalized arguments | Finds wasted turns and rate-limit amplification |
-| `unverified-change` | medium | Mutation tool call plus success language, but no visible verification command or readback | Separates “edited” from “verified” |
-| `secret-risk` | critical | Credential-like pattern in event text, arguments, or results | Creates a local review signal without persisting the suspected secret |
-| `subagent-handoff-loss` | medium | A subagent-family tool succeeded but the final response abandons the completed result | Catches delegated work that gets lost or ignored (v0.2) |
-
-The policies intentionally prefer false negatives over noisy alerts. They are
-also versioned by behavior through tests, not by freezing a catalog snapshot.
-
-### v0.2 · two-stage escalation
-
-Deterministic filtering is stage 1 and always runs free. A small subset of
-signals is marked `ambiguous` (strategy-sensitive retry loops; subagent handoff
-loss with mixed language). With escalation enabled, **only** those candidates
-are confirmed by a cheap model — "model calls scale with uncertainty, not
-traffic", the rd-signal-2 pattern:
+Backfill reads **read-only, bounded, idempotently**:
 
 ```bash
-export HERMES_SIGNALS_ESCALATION_BASE_URL=http://127.0.0.1:8317/v1
-export HERMES_SIGNALS_ESCALATION_MODEL=gemini-3.6-flash-high
-export HERMES_SIGNALS_ESCALATION_API_KEY=your-key
-hermes-signals scan trace.json --escalate --strategy-sensitive
+hermes signals backfill                          # hermes + opencode + claude
+hermes signals backfill --source opencode --max-sessions 50
 ```
 
-The verdict is attached as `confirmed: true | false | null` and shown as
-`[CONFIRMED]` / `[REJECTED]` / `[UNCONFIRMED]` in text output. Escalation is off
-by default and never raises.
+## Policy packs & regression corpus
 
-### v0.3 · feedback & precision
+- **Packs** — local, versioned, user-tunable overrides (severity, suppress,
+  `suppress_when`) as JSON/YAML, without forking code:
+  `hermes signals scan trace.json --pack ~/.hermes/signals-packs/quiet.json`
+- **Corpus** — a labeled regression yardstick ships with the package; every
+  policy change must keep it green (`hermes signals corpus`, and CI runs it on
+  every push). **12/12 traces currently pass.**
 
-Record human labels (Discord reactions map 1:1: ✅ correct, ❌ false_positive,
-🛠️ policy) and track per-signal precision over time:
+## Privacy & safety
 
-```bash
-hermes-signals feedback <trace-id> <signal-id> correct --source discord
-hermes-signals feedback <trace-id> <signal-id> false_positive
-hermes-signals report
-```
-
-`report` prints matched/correct/false-positive/policy counts and precision per
-signal. The same operations are exposed as MCP tools (`feedback`, `precision`).
-
-### Plug-and-forget (v0.3)
-
-Value from the first minute, zero configuration:
-
-```bash
-hermes-signals backfill          # read existing session history → seed the report
-hermes-signals status            # armed state, counts, auto-detected escalation mode
-hermes-signals digest            # weekly markdown report (numbers only)
-hermes-signals digest --cron-install   # register a Sunday 9am no-agent cron job
-```
-
-- **Backfill** scans Hermes `state.db`, OpenCode `opencode.db`, and Claude
-  Desktop JSONL (read-only, bounded, idempotent) so the first report is about
-  *your* agents, not a demo.
-- **Escalation auto-wires**: env vars → Hermes `config.yaml` → local endpoint
-  detection (ollama keyless; CLIProxy with an existing key) → gracefully off.
-  `--escalate` needs zero setup.
-- **Install self-check**: the Hermes plugin logs a one-time "armed" line on
-  first load and writes a marker; `status` summarizes everything.
-- **Digest cron** is a no-agent script job — no LLM cost, delivered verbatim.
-
-## Trace format
-
-Signals accepts a small JSON object with an `events` list:
-
-```json
-{
-  "trace_id": "optional-source-id",
-  "events": [
-    {
-      "type": "tool_call",
-      "id": "call-1",
-      "name": "update_record",
-      "arguments": {"id": 42}
-    },
-    {
-      "type": "tool_result",
-      "tool_call_id": "call-1",
-      "status": "error",
-      "content": "request timed out"
-    },
-    {
-      "type": "assistant",
-      "content": "The record was successfully updated."
-    }
-  ]
-}
-```
-
-Supported compatibility aliases include `trace` for `events`, `tool_name` for
-`name`, `args` for `arguments`, and `result_for` for `tool_call_id`.
-
-For Hermes conversation messages, use:
-
-```python
-from hermes_signals import trace_from_conversation
-
-trace = trace_from_conversation(messages, final_response="...")
-```
-
-## Privacy and safety
-
-- No network requests are made by the classifier.
-- No LLM calls are made by the classifier.
-- Stable trace IDs are short SHA-256 prefixes of the local trace shape.
-- Signal evidence contains counts and booleans, not raw content.
+- No network requests, no LLM calls, no outbound telemetry — ever.
+- Evidence contains counts and booleans, not raw content.
 - Credential-like matches are replaced with `[REDACTED_SECRET]`.
-- The Hermes plugin writes only bounded metadata to a local JSONL file.
-- The plugin is an observer: it does not modify prompts, tool calls, or results.
-- The plugin catches its own errors so diagnostics cannot interrupt an agent turn.
+- Stable trace IDs are short SHA-256 prefixes of the local trace shape.
+- The plugin is a fail-open observer: it cannot break an agent turn.
 
 ## Development
 
 ```bash
 git clone https://github.com/DECRUX9812/hermes-signals.git
 cd hermes-signals
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[dev]'
-pytest -q
-ruff check .
-python -m hermes_signals.cli demo --output json
+python -m venv .venv && . .venv/bin/activate
+pip install -e '.[dev]'
+pytest -q && ruff check . && python -m hermes_signals.cli corpus
 ```
 
-The test suite covers policy behavior, eventual success, secret redaction,
-JSONL privacy, CLI output, manifest shape, and the Hermes plugin registration
-contract. The CI matrix runs on Python 3.11, 3.12, and 3.13.
+120+ tests cover policy behavior, eventual success, secret redaction, JSONL
+privacy, backfill adapters, escalation resolution, and the plugin contract.
+CI runs Python 3.11–3.13 plus the regression-corpus gate.
 
 ## Roadmap
 
-- [x] Deterministic local classifier library
-- [x] Offline JSON trace scanner
-- [x] Hermes `post_llm_call` plugin
-- [x] Bounded local JSONL reports
-- [x] Redacted secret-risk evidence
-- [ ] Pluggable signal policy packs
-- [ ] Optional Discord or webhook reporter, disabled by default
-- [ ] Feedback labels (`correct`, `false-positive`, `policy`) for local evaluation
-- [ ] Optional cheap-model review only for ambiguous candidates
-- [ ] Drift and regression report across policy versions
-
-## Relationship to Raindrop Signals
-
-Raindrop's Signals product is a hosted production platform for building and
-running task-specific classifiers at scale. Hermes Signals is not a replacement
-for that infrastructure. It applies the useful architectural idea—deterministic
-context selection before semantic review—to a portable, local-first Hermes
-plugin that any user can inspect and run.
+- [x] Deterministic classifier (8 signals, v0.4)
+- [x] Hermes plugin + CLI + MCP server
+- [x] Backfill from Hermes / OpenCode / Claude stores
+- [x] Two-stage escalation with batched judging + double-check
+- [x] Feedback labels, precision report, weekly digest cron
+- [x] Policy packs + regression corpus + CI gate
+- [x] One-shot `setup` and `doctor` self-check (set-and-forget)
+- [ ] Webhook/Discord reporter (disabled by default)
+- [ ] More backfill sources (Cline, Aider, LangChain JSONL)
+- [ ] Per-policy false-positive budget alerts in the digest
 
 ## Contributing
 
-Start with a failing behavior test. Keep policies deterministic and explainable.
-Do not add telemetry, secrets, hosted dependencies, or core Hermes changes.
-Every new signal should document:
-
-1. the behavior it detects;
-2. the evidence required to match it;
-3. important non-matches and false-positive boundaries;
-4. privacy behavior; and
-5. a focused test fixture.
+Start with a failing behavior test. Keep policies deterministic and
+explainable. No telemetry, no hosted dependencies, no core Hermes changes. Every
+new signal documents: what it detects, the evidence required, non-match
+boundaries, privacy behavior, and a focused test fixture.
 
 ## License
 

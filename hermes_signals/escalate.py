@@ -314,24 +314,166 @@ def escalation_config_from_env(environ: dict[str, str] | None = None) -> dict[st
 
 
 def _hermes_config(hermes_home: str | Path | None, environ: dict[str, str]) -> dict[str, str] | None:
-    """Read provider/model/base_url + api key from a Hermes profile."""
-    try:
-        import yaml  # soft dependency: only present inside a Hermes install
-    except ImportError:
-        return None
+    """Read provider/model/base_url + api key from a Hermes profile.
+
+    Resolution per provider: an explicit ``base_url`` in config.yaml wins; a
+    provider without one is looked up in Hermes's own provider registry
+    (``providers.get_provider_profile``) or the static catalog below, so
+    providers like opencode-go, openrouter, dashscope, or any registered
+    provider resolve to their real endpoint + key automatically. Keys come
+    from the process env, then ``$HERMES_HOME/.env``, then ``auth.json``.
+    """
     home = Path(hermes_home or environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
-    try:
-        raw = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8")) or {}
-        model_section = raw.get("model", {}) or {}
-        base_url = str(model_section.get("base_url") or "").strip()
-        provider = str(model_section.get("provider") or "").strip()
-        model = str(model_section.get("default") or "").strip()
-        if not base_url or not model:
-            return None
-        api_key = _auth_key(home, provider)
-        return {"base_url": base_url, "model": model, "api_key": api_key}
-    except Exception:
+    model_section = _read_model_section(home)
+    if not model_section:
         return None
+    base_url = str(model_section.get("base_url") or "").strip()
+    provider = str(model_section.get("provider") or "").strip()
+    model = str(model_section.get("default") or "").strip()
+    if base_url and model:
+        return {"base_url": base_url, "model": model, "api_key": _auth_key(home, provider)}
+    if provider:
+        return _provider_config(provider, model, home, environ)
+    return None
+
+
+def _read_model_section(home: Path) -> dict[str, str]:
+    """Parse the flat ``model:`` section of config.yaml.
+
+    PyYAML first (present inside a Hermes install); a tiny regex parser as a
+    standalone fallback so the CLI works on a bare Python without yaml.
+    """
+    try:
+        import yaml
+
+        raw = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8")) or {}
+        section = raw.get("model", {}) or {}
+        if isinstance(section, dict):
+            return {str(key): str(value) for key, value in section.items() if value is not None}
+        return {}
+    except ImportError:
+        pass
+    except Exception:
+        return {}
+    try:
+        text = (home / "config.yaml").read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    section: dict[str, str] = {}
+    in_model = False
+    for line in text.splitlines():
+        if re.match(r"^model\s*:", line):
+            in_model = True
+            continue
+        if not in_model:
+            continue
+        if re.match(r"^\S", line):
+            break  # next top-level key
+        match = re.match(r"^\s+([A-Za-z0-9_]+)\s*:\s*(.*)$", line)
+        if match:
+            section[match.group(1)] = match.group(2).strip().strip("\"'")
+    return section
+
+
+def _env_file_values(home: Path) -> dict[str, str]:
+    """Parse ``$HERMES_HOME/.env`` into a dict (values stay in-process)."""
+    try:
+        text = (home / ".env").read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().strip("\"'")
+    return values
+
+
+# Static catalog fallback for well-known OpenAI-compatible providers when the
+# Hermes provider registry is not importable (standalone usage). Each entry:
+# base_url, env var carrying the key, and a conservative cheap judge default.
+_PROVIDER_CATALOG: dict[str, dict[str, str]] = {
+    "opencode-go": {
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "env_key": "OPENCODE_GO_API_KEY",
+        "default_model": "glm-5",
+    },
+    "opencode-zen": {
+        "base_url": "https://opencode.ai/zen/v1",
+        "env_key": "OPENCODE_ZEN_API_KEY",
+        "default_model": "gemini-3-flash",
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_key": "OPENROUTER_API_KEY",
+        "default_model": "deepseek/deepseek-chat",
+    },
+    "dashscope": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "env_key": "DASHSCOPE_API_KEY",
+        "default_model": "qwen-turbo",
+    },
+    "hypercharm": {
+        "base_url": "https://hyper.charm.land/v1",
+        "env_key": "HYPERCHARM_API_KEY",
+        "default_model": "deepseek-v4-flash",
+    },
+}
+
+
+def _provider_config(
+    provider: str, model: str, home: Path, environ: dict[str, str]
+) -> dict[str, str] | None:
+    """Resolve one provider to (base_url, model, api_key).
+
+    Tries Hermes's live provider registry first (covers every registered
+    provider: openrouter, anthropic, gemini, deepseek, nvidia, ...), then the
+    static catalog. An explicit ``<PROVIDER>_BASE_URL`` env var overrides the
+    endpoint. Returns None when the provider is unknown or has no key.
+    """
+    entry = _PROVIDER_CATALOG.get(provider)
+    env_var = f"{provider.upper().replace('-', '_')}_BASE_URL"
+    file_values = _env_file_values(home)
+
+    def _value(name: str) -> str:
+        return environ.get(name, "").strip() or file_values.get(name, "").strip()
+
+    base_url = _value(env_var)
+    api_key = ""
+    default_model = ""
+
+    try:
+        from providers import get_provider_profile
+
+        profile = get_provider_profile(provider)
+        if profile is not None:
+            base_url = base_url or str(getattr(profile, "base_url", "") or "")
+            for candidate in getattr(profile, "env_vars", ()) or ():
+                if _value(str(candidate)):
+                    api_key = _value(str(candidate))
+                    break
+            default_model = str(getattr(profile, "default_aux_model", "") or "")
+    except Exception:  # pragma: no cover - registry only exists inside Hermes
+        pass
+
+    if entry and not base_url:
+        base_url = entry["base_url"]
+    if not api_key and entry:
+        api_key = _value(entry["env_key"])
+    if not api_key:
+        api_key = _auth_key(home, provider)
+    if not base_url or not api_key:
+        return None
+    if not entry and not default_model:
+        # Registry-only provider without a judge default: require an explicit model.
+        return None
+    return {
+        "base_url": base_url,
+        "model": model or (entry or {}).get("default_model", "") or default_model,
+        "api_key": api_key,
+    }
 
 
 def _auth_key(home: Path, provider: str) -> str:
@@ -410,6 +552,34 @@ def _pick_model_id(candidates: list[Any]) -> str:
     return usable[0]
 
 
+def _detect_env_providers(
+    home: Path, environ: dict[str, str]
+) -> dict[str, str] | None:
+    """Last-resort: catalog providers whose API key is present.
+
+    Key sources: the process env (Hermes loads ``~/.hermes/.env`` at startup),
+    then the ``.env`` file directly for standalone CLI use. Model defaults are
+    conservative cheap-judge picks.
+    """
+    file_values = _env_file_values(home)
+
+    def _value(name: str) -> str:
+        return environ.get(name, "").strip() or file_values.get(name, "").strip()
+
+    for name, entry in _PROVIDER_CATALOG.items():
+        key = _value(entry["env_key"])
+        if not key:
+            continue
+        env_var = f"{name.upper().replace('-', '_')}_BASE_URL"
+        base_url = _value(env_var) or entry["base_url"]
+        return {
+            "base_url": base_url,
+            "model": entry["default_model"],
+            "api_key": key,
+        }
+    return None
+
+
 def resolve_escalation_config(
     *,
     hermes_home: str | Path | None = None,
@@ -417,9 +587,11 @@ def resolve_escalation_config(
 ) -> dict[str, str] | None:
     """Resolve escalation config with zero configuration required.
 
-    Order: explicit env vars → Hermes config.yaml (provider/model/base_url +
-    auth.json key) → local endpoint detection (ollama keyless; CLIProxy when a
-    key already exists) → None (deterministic-only, the graceful default).
+    Order: explicit env vars → Hermes config.yaml (base_url, or any registered
+    provider — opencode-go, openrouter, ... — resolved via the provider
+    registry/catalog) → local endpoint detection (ollama keyless; CLIProxy when
+    a key already exists) → catalog providers with a key in the env → None
+    (deterministic-only, the graceful default).
     """
     env = environ if environ is not None else os.environ
     from_env = escalation_config_from_env(env)
@@ -428,7 +600,11 @@ def resolve_escalation_config(
     from_hermes = _hermes_config(hermes_home, env)
     if from_hermes:
         return from_hermes
-    return _detect_local(env)
+    local = _detect_local(env)
+    if local:
+        return local
+    home = Path(hermes_home or env.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    return _detect_env_providers(home, env)
 
 
 def escalation_source(
@@ -436,7 +612,7 @@ def escalation_source(
     hermes_home: str | Path | None = None,
     environ: dict[str, str] | None = None,
 ) -> tuple[str, dict[str, str] | None]:
-    """Return (mode, config) where mode is env | hermes | local | off."""
+    """Return (mode, config) where mode is env | hermes | local | env-provider | off."""
     env = environ if environ is not None else os.environ
     if escalation_config_from_env(env):
         return "env", escalation_config_from_env(env)
@@ -445,4 +621,8 @@ def escalation_source(
     local = _detect_local(env)
     if local:
         return "local", local
+    home = Path(hermes_home or env.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    env_provider = _detect_env_providers(home, env)
+    if env_provider:
+        return "env-provider", env_provider
     return "off", None
