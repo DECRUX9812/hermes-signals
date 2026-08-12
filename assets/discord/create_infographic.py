@@ -1,12 +1,24 @@
+"""Deterministic retro-poster renderer for Hermes Signals launch assets.
+
+Two posters, warm-paper retro style (chunky type, big low-density panels):
+
+- ``hermes-signals-how.png``      — the narrative: agent says done → signals
+                                    checks the trace → you get the truth.
+- ``hermes-signals-install.png``  — the how-to: two commands, then done.
+
+Self-contained: system fonts only, no remote assets. Regenerate with:
+    python3 assets/discord/create_infographic.py
+"""
+
 from __future__ import annotations
 
-import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent
-OUT = ROOT / "hermes-signals-discord.png"
+OUT_HOW = ROOT / "hermes-signals-how.png"
+OUT_INSTALL = ROOT / "hermes-signals-install.png"
 W, H = 1600, 1200
 
 FONT_DIRS = [
@@ -16,7 +28,6 @@ FONT_DIRS = [
 ]
 
 PAPER = (226, 198, 146)
-PAPER_LIGHT = (239, 216, 171)
 INK = (12, 25, 36)
 NAVY = (17, 39, 58)
 BLUE = (34, 67, 84)
@@ -26,6 +37,7 @@ CREAM = (246, 224, 179)
 MUTED = (181, 154, 105)
 OLIVE = (94, 111, 63)
 RED = (199, 48, 39)
+WHITE = (255, 250, 240)
 
 
 def font(names: list[str], size: int) -> ImageFont.FreeTypeFont:
@@ -37,14 +49,14 @@ def font(names: list[str], size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-TITLE = font(["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 100)
-TITLE_SMALL = font(["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 54)
-HEAD = font(["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 46)
-HEAD_SMALL = font(["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 32)
-BODY = font(["Lato-Regular.ttf", "DejaVuSans.ttf", "NotoSans-Regular.ttf"], 28)
-BODY_BOLD = font(["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 29)
-MONO = font(["DejaVuSansMono.ttf"], 27)
-MONO_SMALL = font(["DejaVuSansMono.ttf"], 21)
+TITLE = font(["Lato-Heavy.ttf", "NotoSans-Bold.ttf", "DejaVuSansCondensed-Bold.ttf"], 104)
+HEAD = font(["Lato-Heavy.ttf", "NotoSans-Bold.ttf", "DejaVuSansCondensed-Bold.ttf"], 52)
+HEAD_SMALL = font(["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 34)
+BODY = font(["Lato-Regular.ttf", "DejaVuSans.ttf", "NotoSans-Regular.ttf"], 30)
+BODY_BOLD = font(["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"], 30)
+MONO = font(["DejaVuSansMono.ttf"], 34)
+MONO_SMALL = font(["DejaVuSansMono.ttf"], 22)
+STEP_NUM = font(["Lato-Heavy.ttf", "NotoSans-Bold.ttf", "DejaVuSansCondensed-Bold.ttf"], 120)
 
 
 def rounded(draw: ImageDraw.ImageDraw, box, radius: int, fill, outline=None, width: int = 1):
@@ -56,24 +68,26 @@ def center_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], value: str, fnt,
 
 
 def fit_font(text: str, names: list[str], max_size: int, max_width: int) -> ImageFont.FreeTypeFont:
-    for size in range(max_size, 14, -2):
+    for size in range(max_size, 12, -2):
         fnt = font(names, size)
         if fnt.getbbox(text)[2] <= max_width:
             return fnt
-    return font(names, 14)
+    return font(names, 12)
 
 
 def add_texture(image: Image.Image) -> None:
-    random.seed(20260811)
+    import random
+
+    random.seed(20260812)
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    for _ in range(10500):
+    for _ in range(9500):
         x = random.randrange(W)
         y = random.randrange(H)
         shade = random.choice([(25, 21, 13, 16), (255, 243, 201, 18), (74, 42, 21, 10)])
         radius = random.choice([1, 1, 1, 2])
         draw.ellipse((x, y, x + radius, y + radius), fill=shade)
-    for _ in range(80):
+    for _ in range(70):
         x = random.randrange(W)
         y = random.randrange(H)
         draw.line((x, y, x + random.randrange(14, 80), y + random.randrange(-3, 4)), fill=(45, 30, 15, 13), width=1)
@@ -86,183 +100,126 @@ def draw_outer_frame(draw: ImageDraw.ImageDraw) -> None:
     rounded(draw, (48, 48, W - 48, H - 48), 15, fill=None, outline=(246, 218, 167), width=2)
 
 
-def draw_agent_illustration(image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
-    # A deliberately simple screen-print style agent silhouette, not a detailed UI.
-    draw.ellipse((1110, 53, 1512, 455), fill=ORANGE, outline=(232, 131, 66), width=3)
-    draw.arc((1150, 95, 1470, 410), 205, 337, fill=(236, 155, 82), width=5)
-    # Hair / head.
-    draw.polygon(
-        [(1250, 122), (1282, 93), (1340, 87), (1382, 111), (1415, 145), (1390, 196), (1265, 202), (1225, 168)],
-        fill=INK,
-    )
-    draw.ellipse((1260, 132, 1398, 255), fill=CREAM)
-    draw.polygon(
-        [(1265, 148), (1237, 118), (1285, 109), (1330, 103), (1388, 120), (1407, 157),
-         (1377, 148), (1357, 130), (1304, 139)],
-        fill=INK,
-    )
-    # Face profile and neck.
-    draw.polygon([(1375, 179), (1412, 194), (1390, 210), (1373, 205)], fill=CREAM)
-    draw.rectangle((1320, 229, 1375, 274), fill=CREAM)
-    # Coat and collar.
-    draw.polygon([(1245, 270), (1326, 244), (1384, 264), (1480, 338), (1450, 455), (1168, 455), (1194, 340)], fill=NAVY)
-    draw.polygon([(1325, 248), (1270, 290), (1328, 379), (1372, 271)], fill=CREAM)
-    draw.polygon([(1380, 265), (1330, 380), (1375, 455), (1490, 455), (1460, 335)], fill=(8, 23, 35))
-    # Magnifier / signal lens.
-    draw.ellipse((1150, 316, 1234, 400), outline=CREAM, width=10)
-    draw.line((1220, 386, 1264, 430), fill=CREAM, width=11)
-    draw.ellipse((1167, 333, 1217, 383), outline=RUST, width=3)
-    draw.line((1177, 358, 1207, 358), fill=RUST, width=4)
-    # Tiny signal ticks.
-    draw.line((1118, 269, 1141, 269), fill=CREAM, width=5)
-    draw.line((1112, 285, 1141, 285), fill=CREAM, width=5)
-    draw.line((1460, 238, 1488, 238), fill=CREAM, width=5)
-    draw.line((1460, 254, 1498, 254), fill=CREAM, width=5)
+def down_arrow(draw: ImageDraw.ImageDraw, cy: int) -> None:
+    cx = W // 2
+    draw.line((cx, cy - 12, cx, cy + 22), fill=INK, width=8)
+    draw.polygon([(cx, cy + 38), (cx - 26, cy + 8), (cx + 26, cy + 8)], fill=INK)
 
 
-def draw_header(image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
-    rounded(draw, (58, 58, W - 58, 310), 12, fill=NAVY)
-    draw.rectangle((58, 58, 1040, 310), fill=NAVY)
-    text_x = 92
-    draw.text((text_x, 85), "HERMES", font=TITLE, fill=CREAM, stroke_width=2, stroke_fill=INK)
-    draw.text((text_x, 177), "SIGNALS", font=TITLE, fill=ORANGE, stroke_width=2, stroke_fill=INK)
-    draw.text((text_x + 7, 266), "LOCAL-FIRST BEHAVIOR QUALITY FOR AI AGENTS", font=HEAD_SMALL, fill=CREAM)
-    draw_agent_illustration(image, draw)
-
-
-def draw_icon(draw: ImageDraw.ImageDraw, center: tuple[int, int], kind: str, color, dark=INK) -> None:
-    cx, cy = center
-    draw.ellipse((cx - 68, cy - 68, cx + 68, cy + 68), fill=color, outline=CREAM, width=4)
-    if kind == "false":
-        draw.line((cx - 30, cy - 26, cx + 28, cy + 30), fill=dark, width=13)
-        draw.line((cx + 28, cy - 26, cx - 30, cy + 30), fill=dark, width=13)
-        draw.line((cx - 27, cy - 44, cx + 34, cy - 44), fill=dark, width=9)
-    elif kind == "retry":
-        draw.arc((cx - 37, cy - 36, cx + 38, cy + 38), 205, 530, fill=dark, width=12)
-        draw.polygon([(cx + 30, cy - 38), (cx + 51, cy - 13), (cx + 15, cy - 14)], fill=dark)
-        draw.arc((cx - 38, cy - 38, cx + 37, cy + 38), 25, 170, fill=CREAM, width=5)
-    elif kind == "change":
-        draw.line((cx - 39, cy + 22, cx - 5, cy - 12), fill=dark, width=12)
-        draw.line((cx - 5, cy - 12, cx + 36, cy - 36), fill=dark, width=12)
-        draw.polygon([(cx + 30, cy - 52), (cx + 52, cy - 38), (cx + 34, cy - 18)], fill=dark)
-        draw.line((cx - 40, cy + 42, cx + 41, cy + 42), fill=dark, width=7)
-    elif kind == "secret":
-        draw.rounded_rectangle((cx - 39, cy - 20, cx + 40, cy + 29), radius=7, outline=dark, width=8)
-        draw.arc((cx - 20, cy - 49, cx + 20, cy - 2), 180, 360, fill=dark, width=8)
-        draw.line((cx - 24, cy + 5, cx + 24, cy + 5), fill=RED, width=9)
-        draw.line((cx - 31, cy + 15, cx + 31, cy + 15), fill=RED, width=9)
-
-
-def draw_panel(
-    draw: ImageDraw.ImageDraw,
-    box,
-    fill,
-    accent,
-    title: str,
-    subtitle: str,
-    icon_kind: str,
-    title_fill=CREAM,
-    body_fill=CREAM,
-) -> None:
+def speech_bubble(draw: ImageDraw.ImageDraw, box, fill) -> None:
     x1, y1, x2, y2 = box
-    draw.rectangle(box, fill=fill, outline=CREAM, width=5)
-    draw_icon(draw, (x1 + 106, y1 + 94), icon_kind, accent)
-    title_font = fit_font(
-        title,
-        ["Lato-Heavy.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"],
-        47,
-        x2 - x1 - 250,
-    )
-    draw.text((x1 + 195, y1 + 48), title, font=title_font, fill=title_fill)
-    draw.line((x1 + 195, y1 + 116, x2 - 42, y1 + 116), fill=accent, width=7)
-    body_font = fit_font(
-        subtitle,
-        ["Lato-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "NotoSans-Bold.ttf"],
-        31,
-        x2 - x1 - 242,
-    )
-    draw.text((x1 + 195, y1 + 143), subtitle, font=body_font, fill=body_fill)
-
-
-def draw_footer(draw: ImageDraw.ImageDraw) -> None:
-    y1, y2 = 960, 1140
-    draw.rectangle((58, y1, W - 58, y2), fill=NAVY, outline=CREAM, width=5)
-    draw.text((92, y1 + 27), "TRY IT ON YOUR MESSIEST TRACE", font=HEAD_SMALL, fill=ORANGE)
-    command = "hermes plugins install DECRUX9812/hermes-signals --enable"
-    command_font = fit_font(command, ["DejaVuSansMono.ttf"], 29, 1060)
-    draw.text((92, y1 + 78), command, font=command_font, fill=CREAM)
-    center_text(draw, (1340, y1 + 48), "TEST IT  ·  BREAK IT", HEAD_SMALL, CREAM)
-    center_text(draw, (1340, y1 + 92), "TELL US WHAT'S WRONG", HEAD_SMALL, ORANGE)
-    # Keep the metadata clear of the footer border: PIL's default anchor is the
-    # text top, so give the 21px line ~20px of clearance.
-    draw.text((92, y2 - 42), "github.com/DECRUX9812/hermes-signals", font=MONO_SMALL, fill=MUTED)
-    draw.text(
-        (W - 92, y2 - 42),
-        "MIT  ·  NO GPU  ·  NO API KEY  ·  NO TELEMETRY",
-        font=MONO_SMALL,
-        fill=MUTED,
-        anchor="ra",
+    rounded(draw, box, 34, fill=fill, outline=CREAM, width=6)
+    tail = (x1 + 120, y2 - 8)
+    draw.polygon(
+        [(tail[0] - 30, y2 - 4), (tail[0] + 30, y2 - 4), (tail[0], y2 + 34)],
+        fill=fill,
     )
 
 
-def main() -> None:
+# ---------------------------------------------------------------------------
+# Poster 1 — HOW IT WORKS (the narrative)
+# ---------------------------------------------------------------------------
+
+
+def poster_how() -> None:
     image = Image.new("RGBA", (W, H), PAPER)
     draw = ImageDraw.Draw(image)
     draw_outer_frame(draw)
-    draw_header(image, draw)
 
-    grid_left, grid_top = 58, 330
-    grid_right, grid_bottom = W - 58, 930
-    mid_x = (grid_left + grid_right) // 2
-    mid_y = (grid_top + grid_bottom) // 2
-    draw_panel(
-        draw,
-        (grid_left, grid_top, mid_x, mid_y),
-        BLUE,
-        RED,
-        "FALSE SUCCESS",
-        "tool failed  →  agent says DONE",
-        "false",
-    )
-    draw_panel(
-        draw,
-        (mid_x, grid_top, grid_right, mid_y),
-        RUST,
-        CREAM,
-        "RETRY LOOP",
-        "same action  →  same failure",
-        "retry",
-        title_fill=CREAM,
-        body_fill=CREAM,
-    )
-    draw_panel(
-        draw,
-        (grid_left, mid_y, mid_x, grid_bottom),
-        NAVY,
-        ORANGE,
-        "UNVERIFIED CHANGE",
-        "changed  ≠  verified",
-        "change",
-    )
-    draw_panel(
-        draw,
-        (mid_x, mid_y, grid_right, grid_bottom),
-        OLIVE,
-        CREAM,
-        "SECRET RISK",
-        "finds it  +  redacts it",
-        "secret",
-        title_fill=CREAM,
-        body_fill=CREAM,
-    )
+    # Header.
+    draw.text((92, 92), "CATCH THE LIE", font=TITLE, fill=INK, stroke_width=2, stroke_fill=CREAM)
+    draw.text((94, 216), "your agent says done. the trace says otherwise.", font=HEAD_SMALL, fill=NAVY)
 
-    draw_footer(draw)
+    # Panel 1 — the claim.
+    speech_bubble(draw, (90, 330, 1510, 520), BLUE)
+    center_text(draw, (800, 388), "DONE — DEPLOYED", HEAD, CREAM)
+    # Drawn checkmark (no emoji font dependency).
+    draw.line((736, 472, 766, 502), fill=CREAM, width=10)
+    draw.line((766, 502, 830, 428), fill=CREAM, width=10)
+    draw.text((94, 552), "1 · the agent claims it's done", font=BODY, fill=NAVY)
+    down_arrow(draw, 620)
+
+    # Panel 2 — the trace.
+    rounded(draw, (90, 668, 1510, 872), 26, fill=NAVY, outline=CREAM, width=5)
+    draw.text((140, 718), "deploy → exit 1", font=MONO, fill=RED)
+    draw.text((140, 782), "deploy → exit 1", font=MONO, fill=RED)
+    draw.text((94, 902), "2 · the trace shows what really happened", font=BODY, fill=NAVY)
+    down_arrow(draw, 968)
+
+    # Panel 3 — the truth (clear of the inner frame: bottom < 1139).
+    rounded(draw, (90, 996, 1510, 1130), 26, fill=RUST, outline=CREAM, width=5)
+    draw.text((140, 1022), "FALSE SUCCESS", font=HEAD, fill=CREAM)
+    draw.text((140, 1082), "tool failed · the agent claimed success · now you know", font=BODY, fill=CREAM)
+
     add_texture(image)
-
-    # Slightly soften the printed edges like the supplied poster references.
     image = image.convert("RGB").filter(ImageFilter.GaussianBlur(0.18))
-    image.save(OUT, format="PNG", optimize=True)
-    print(OUT)
+    image.save(OUT_HOW, format="PNG", optimize=True)
+    print(OUT_HOW)
+
+
+# ---------------------------------------------------------------------------
+# Poster 2 — INSTALL (the how-to)
+# ---------------------------------------------------------------------------
+
+
+def poster_install() -> None:
+    image = Image.new("RGBA", (W, H), PAPER)
+    draw = ImageDraw.Draw(image)
+    draw_outer_frame(draw)
+
+    # Header.
+    draw.text((92, 88), "INSTALL. SET. FORGET.", font=TITLE, fill=INK, stroke_width=2, stroke_fill=CREAM)
+    draw.text((94, 212), "two commands. then it watches for you.", font=HEAD_SMALL, fill=NAVY)
+
+    # Step 1.
+    rounded(draw, (90, 300, 1510, 470), 26, fill=BLUE, outline=CREAM, width=5)
+    draw.ellipse((140, 330, 250, 440), fill=CREAM)
+    center_text(draw, (195, 385), "1", STEP_NUM, BLUE)
+    command_1 = "hermes plugins install DECRUX9812/hermes-signals --enable"
+    cmd_font = fit_font(command_1, ["DejaVuSansMono.ttf"], 34, 1180)
+    draw.text((310, 340), command_1, font=cmd_font, fill=CREAM)
+    draw.text((312, 402), "adds the plugin to Hermes", font=BODY, fill=CREAM)
+
+    # Step 2.
+    rounded(draw, (90, 510, 1510, 680), 26, fill=NAVY, outline=CREAM, width=5)
+    draw.ellipse((140, 540, 250, 650), fill=CREAM)
+    center_text(draw, (195, 595), "2", STEP_NUM, NAVY)
+    command_2 = "hermes signals setup"
+    cmd_font = fit_font(command_2, ["DejaVuSansMono.ttf"], 34, 1180)
+    draw.text((310, 550), command_2, font=cmd_font, fill=CREAM)
+    draw.text(
+        (312, 612),
+        "backfills your history · arms monitoring · installs the weekly digest",
+        font=BODY,
+        fill=CREAM,
+    )
+
+    # Step 3 — done.
+    rounded(draw, (90, 720, 1510, 890), 26, fill=OLIVE, outline=CREAM, width=5)
+    draw.ellipse((140, 750, 250, 860), fill=CREAM)
+    center_text(draw, (195, 805), "3", STEP_NUM, OLIVE)
+    draw.text((310, 760), "DONE", font=HEAD, fill=CREAM)
+    draw.text((312, 824), "you never touch it again", font=BODY, fill=CREAM)
+
+    # What happens next strip.
+    rounded(draw, (90, 930, 1510, 1090), 26, fill=PAPER, outline=INK, width=4)
+    draw.text((140, 956), "WHAT HAPPENS NEXT", font=HEAD_SMALL, fill=NAVY)
+    draw.text((140, 1014), "every turn scanned locally", font=BODY, fill=INK)
+    draw.text((560, 1014), "weekly digest on its own", font=BODY, fill=INK)
+    draw.text((1030, 1014), "hermes signals doctor", font=BODY, fill=INK)
+
+    draw.text((92, 1128), "remove anytime:  hermes plugins disable hermes-signals", font=MONO_SMALL, fill=NAVY)
+    draw.text((1508, 1128), "github.com/DECRUX9812/hermes-signals", font=MONO_SMALL, fill=NAVY, anchor="ra")
+
+    add_texture(image)
+    image = image.convert("RGB").filter(ImageFilter.GaussianBlur(0.18))
+    image.save(OUT_INSTALL, format="PNG", optimize=True)
+    print(OUT_INSTALL)
+
+
+def main() -> None:
+    poster_how()
+    poster_install()
 
 
 if __name__ == "__main__":

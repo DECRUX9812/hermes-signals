@@ -68,6 +68,31 @@ hermes-signals corpus                           # labeled regression yardstick
 Packs are local JSON/YAML severity/suppress overrides; the corpus ships with
 the package and CI enforces it on every push.
 
+### Guardrails (v0.5)
+
+Pre-execution enforcement — the one capability hosted observability cannot
+offer. The plugin registers a `pre_tool_call` hook that blocks credential-like
+material before a tool call executes:
+
+```bash
+HERMES_SIGNALS_GUARDRAIL_ACTION=block   # default: block | warn | off
+hermes-signals guardrail --tool terminal --args '{"command": "echo token=sk-..."}'
+```
+
+`block` returns a `pre_tool_call` directive (the call never runs; the agent
+sees the reason and self-corrects). `warn` records to
+`$HERMES_HOME/signals-guardrail.jsonl` and proceeds. Fail-open: scan errors
+never block.
+
+### Webhook alerts (v0.5, opt-in)
+
+Set `HERMES_SIGNALS_WEBHOOK_URL` and critical signals (e.g. `secret-risk`)
+POST a compact, redacted alert — counts and ids only, no raw content:
+
+```bash
+hermes-signals webhook --url https://hooks.example/alert   # test delivery
+```
+
 ### Feedback & precision (v0.3)
 
 Labels map to Discord reactions (✅ correct, ❌ false_positive, 🛠️ policy):

@@ -1,6 +1,13 @@
-# Discord share asset
+# Discord share assets
 
-- `hermes-signals-discord.png` — 1600×1200 retro-poster infographic (warm paper, chunky type).
-- `create_infographic.py` — deterministic Pillow renderer for regenerating the image.
+- `hermes-signals-how.png` — 1600×1200 narrative poster: agent says done →
+  the trace shows failure → FALSE SUCCESS. Use for launches/sharing.
+- `hermes-signals-install.png` — 1600×1200 how-to poster: two commands, then
+  done. Use for onboarding/quickstarts.
+- `create_infographic.py` — deterministic Pillow renderer for both posters.
 
-The graphic is intentionally self-contained and uses no remote assets or fonts.
+Self-contained: system fonts only, no remote assets. Regenerate with:
+
+```bash
+python3 assets/discord/create_infographic.py
+```

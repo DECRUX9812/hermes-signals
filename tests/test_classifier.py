@@ -165,7 +165,23 @@ def test_strong_prefix_token_always_fires_regardless_of_entropy() -> None:
             {
                 "type": "tool_call",
                 "name": "terminal",
-                "arguments": {"command": "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                "arguments": {"command": "ghp_" + "a" * 24},
+            },
+        ]
+    }
+
+    assert "secret-risk" in ids(trace)
+
+
+def test_bearer_header_token_fires_secret_risk() -> None:
+    trace = {
+        "events": [
+            {
+                "type": "tool_call",
+                "name": "terminal",
+                "arguments": {
+                    "command": 'curl -H "Authorization: Bearer K9xQm2Vp7LzR4tW8cB1nF3jH5sD6gY0a" url'
+                },
             },
         ]
     }

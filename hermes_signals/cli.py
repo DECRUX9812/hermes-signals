@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from hermes_signals.corpus import corpus_summary, run_corpus
 from hermes_signals.digest import build_digest_markdown, cron_install
 from hermes_signals.doctor import run_doctor
 from hermes_signals.escalate import escalate_signals, resolve_escalation_config
+from hermes_signals.guardrail import evaluate_guardrail
+from hermes_signals.notify import build_alert_payload, webhook_notify
 from hermes_signals.packs import apply_pack, installed_packs, load_pack
 from hermes_signals.status import arm_if_needed, status_report
 from hermes_signals.store import precision_report, record_feedback
@@ -196,6 +199,26 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     setup.add_argument("--dry-run", action="store_true", help="Print the plan without changing anything")
 
     subs.add_parser("doctor", help="Self-check: store, corpus, escalation, digest cron")
+
+    guard = subs.add_parser(
+        "guardrail",
+        help="Test the pre-execution guardrail against one tool call",
+    )
+    guard.add_argument("--tool", default="terminal", help="Tool name (default: terminal)")
+    guard.add_argument(
+        "--args",
+        required=True,
+        help='JSON object of tool arguments, e.g. \'{"command": "token=sk-..."}\'',
+    )
+    guard.add_argument(
+        "--action",
+        default="",
+        help="Override HERMES_SIGNALS_GUARDRAIL_ACTION (block|warn|off)",
+    )
+
+    webhook = subs.add_parser("webhook", help="Send a test alert to the configured webhook")
+    webhook.add_argument("--url", default="", help="Override HERMES_SIGNALS_WEBHOOK_URL")
+
     subparser.set_defaults(func=signals_command)
 
 
@@ -297,6 +320,10 @@ def signals_command(args: argparse.Namespace) -> int:
         return _run_setup(args)
     if action == "doctor":
         return _run_doctor()
+    if action == "guardrail":
+        return _run_guardrail(args)
+    if action == "webhook":
+        return _run_webhook(args)
     if action == "demo":
         trace = _DEMO_TRACE
     else:
@@ -395,6 +422,36 @@ def _run_doctor() -> int:
         return 1
     print("doctor: all required checks pass")
     return 0
+
+
+def _run_guardrail(args: argparse.Namespace) -> int:
+    """Test the guardrail against one tool call; exit 0=pass, 1=blocked."""
+    try:
+        tool_args = json.loads(args.args)
+    except json.JSONDecodeError as exc:
+        print(f"hermes-signals: invalid --args JSON: {exc}")
+        return 2
+    environ = dict(os.environ)
+    if args.action:
+        environ["HERMES_SIGNALS_GUARDRAIL_ACTION"] = args.action
+    directive = evaluate_guardrail(args.tool, tool_args, environ=environ)
+    if not directive:
+        print(f"PASS — no credential-like material in {args.tool} arguments")
+        return 0
+    action = directive["action"]
+    print(f"{action.upper()} — {directive['message']}")
+    return 1 if action == "block" else 0
+
+
+def _run_webhook(args: argparse.Namespace) -> int:
+    """Send a test alert to HERMES_SIGNALS_WEBHOOK_URL (or --url)."""
+    url = args.url or os.environ.get("HERMES_SIGNALS_WEBHOOK_URL", "").strip()
+    if not url:
+        print("no webhook configured (set HERMES_SIGNALS_WEBHOOK_URL or pass --url)")
+        return 2
+    ok = webhook_notify(url, build_alert_payload(signal_ids=["test"], platform="cli"))
+    print("✅ alert delivered" if ok else "⚠ delivery failed")
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:

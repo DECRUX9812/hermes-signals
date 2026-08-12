@@ -54,6 +54,36 @@ Most of the industry's answer is another dashboard. Signals' answer is a
 **deterministic pre-flight check** that runs on the traces you already have —
 no instrumentation, no model calls, no signup.
 
+## Guardrails (pre-execution)
+
+The one capability hosted observability can't offer: a deterministic policy
+layer that enforces **before** the call executes. Hermes Signals registers a
+`pre_tool_call` hook that blocks credential-like material from ever reaching a
+tool — your API keys can't be typed into a command, written into a file, or
+pasted into a chat tool:
+
+```text
+terminal: curl -H "Authorization: Bearer sk-..." https://api.x   →  BLOCKED
+          "hermes-signals guardrail: credential-like material detected in
+           terminal arguments. use an environment variable or a secret file."
+```
+
+- `block` (default) — the call never executes; the agent sees the reason and
+  self-corrects to an env-var approach
+- `warn` — the call proceeds; a local guardrail log entry is written
+- `off` — disable entirely
+
+```bash
+HERMES_SIGNALS_GUARDRAIL_ACTION=warn hermes   # per-process switch
+hermes signals guardrail --tool terminal --args '{"command": "echo token=sk-..."}'
+# → BLOCK — credential-like material detected…
+```
+
+Detection shares the `secret-risk` policy: hard token prefixes (GitHub, OpenAI,
+AWS, Slack) plus entropy-gated `key=`/`Bearer` values, scanning the first 8 KiB
+of arguments so huge payloads stay cheap. The guardrail is fail-open — a scan
+error never blocks a call.
+
 ## Install (set and forget)
 
 ```bash
@@ -66,7 +96,10 @@ the first report (so it's about **your** agents, not a demo), installs a weekly
 digest cron, and prints a status summary. You never touch it again:
 
 - every Hermes turn is scanned locally after it completes — zero model calls
+- credential-like tool calls are blocked before they execute
 - a weekly digest lands on its own (numbers only, no raw content)
+- critical signals (e.g. `secret-risk`) can POST a compact alert to a webhook
+  (`HERMES_SIGNALS_WEBHOOK_URL`, opt-in, redacted payload)
 - label what you see and precision improves over time:
   `hermes signals feedback <trace> <signal> correct|false_positive|policy`
 
@@ -79,7 +112,9 @@ hermes signals digest    # the weekly report, on demand
 
 Remove it any time: `hermes plugins disable hermes-signals`.
 
-![Hermes Signals — launch poster](assets/discord/hermes-signals-discord.png)
+![How it works — your agent says done, the trace says otherwise](assets/discord/hermes-signals-how.png)
+
+![Install — two commands, then it watches for you](assets/discord/hermes-signals-install.png)
 
 ## What it catches
 
@@ -137,6 +172,7 @@ at scale, in a team dashboard. Signals occupies the corner they don't:
 | Cost | **$0, always** | Per-token evals / seats | Infrastructure + model evals |
 | Telemetry | **Zero outbound** | Trace upload by design | Self-hosted |
 | Failure-mode signals (false-success, retry-loop, …) | **Built-in, 8 signals** | Bring-your-own evaluator | Bring-your-own evaluator |
+| Blocks bad calls mid-run | **Yes — `pre_tool_call` guardrail** | No — post-hoc only | No |
 
 Signals is the *pre-flight check* layer: cheap, local, deterministic, and it
 works on traces you already have — no SDK changes, no migration, no signup.
@@ -202,8 +238,9 @@ CI runs Python 3.11–3.13 plus the regression-corpus gate.
 - [x] Feedback labels, precision report, weekly digest cron
 - [x] Policy packs + regression corpus + CI gate
 - [x] One-shot `setup` and `doctor` self-check (set-and-forget)
-- [ ] Webhook/Discord reporter (disabled by default)
+- [x] Pre-execution guardrails (block credential-like tool calls) + webhook alerts (v0.5)
 - [ ] More backfill sources (Cline, Aider, LangChain JSONL)
+- [ ] Retry-loop throttle guardrail (block after N identical failures)
 - [ ] Per-policy false-positive budget alerts in the digest
 
 ## Contributing

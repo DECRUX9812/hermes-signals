@@ -98,9 +98,10 @@ _SECRET_PREFIX_RE = re.compile(
     r"AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,})\b"
 )
 _GENERIC_SECRET_RE = re.compile(
-    r"(?i)\b(?:token|api[_ -]?key|secret|password|authorization|bearer)"
+    r"(?i)\b(?:token|api[_ -]?key|secret|password|authorization)"
     r"\s*[:=]\s*([^\s,;]{12,})"
 )
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._\-]{16,})")
 _MIN_SECRET_ENTROPY = 2.8  # bits per char: repeated/sequential values fail, real tokens pass
 
 
@@ -190,17 +191,24 @@ def _redact(value: str) -> str:
         lambda m: f"{m.group(0)[: m.start(1) - m.start(0)]}[REDACTED_SECRET]",
         redacted,
     )
+    redacted = _BEARER_RE.sub(
+        lambda m: f"{m.group(0)[: m.start(1) - m.start(0)]}[REDACTED_SECRET]",
+        redacted,
+    )
     return redacted
 
 
 def _has_secret(value: str) -> bool:
     if _SECRET_PREFIX_RE.search(value):
         return True
-    for match in _GENERIC_SECRET_RE.finditer(value):
-        candidate = match.group(1)
-        if len(candidate) >= 12 and _shannon_entropy(candidate) >= _MIN_SECRET_ENTROPY:
-            return True
-    return False
+    candidates = [
+        match.group(1)
+        for match in (*_GENERIC_SECRET_RE.finditer(value), *_BEARER_RE.finditer(value))
+    ]
+    return any(
+        len(candidate) >= 12 and _shannon_entropy(candidate) >= _MIN_SECRET_ENTROPY
+        for candidate in candidates
+    )
 
 
 def _sensitive_event_text(event: dict[str, Any]) -> str:
@@ -563,4 +571,25 @@ def stable_trace_id(trace: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()[:12]
 
 
-__all__ = ["Signal", "classify_trace", "stable_trace_id", "trace_from_conversation"]
+def contains_secret(value: str) -> bool:
+    """True when a string holds credential-like material (guardrail-safe).
+
+    Same policy as the ``secret-risk`` signal: hard prefix patterns (GitHub,
+    OpenAI, AWS, Slack tokens) or a high-entropy ``key=`` value.
+    """
+    return _has_secret(value)
+
+
+def redact_secrets(value: str) -> str:
+    """Replace credential-like material with ``[REDACTED_SECRET]``."""
+    return _redact(value)
+
+
+__all__ = [
+    "Signal",
+    "classify_trace",
+    "contains_secret",
+    "redact_secrets",
+    "stable_trace_id",
+    "trace_from_conversation",
+]
