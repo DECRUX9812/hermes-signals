@@ -283,7 +283,7 @@ boundaries, privacy behavior, and a focused test fixture.
 ## Community
 
 - **Give feedback** — label what you see: `hermes signals feedback <trace> <signal> correct|false_positive|policy`. Every label improves the precision report and the next policy version.
-- **Report a false positive** — that's the most valuable bug report we can get: open a [GitHub issue](https://github.com/DECRUX9812/hermes-signals/issues/new) with the trace (secrets redacted) or drop the trace file in the [Discussions](https://github.com/DECRUX9812/hermes-signals/discussions) tab.
+- **Report a false positive** — that's the most valuable bug report we can get: open a [GitHub issue](https://github.com/DECRUX9812/hermes-signals/issues/new) with the trace (secrets redacted) or attach the trace to a [GitHub issue](https://github.com/DECRUX9812/hermes-signals/issues/new).
 - **Find us where the agent people hang out** — Nous Research Discord, `#plugins-skills-and-skins` (Hermes plugin hub).
 - **Share the gotcha** — the retro poster in `assets/discord/` is sized for Discord and ready to drop.
 
