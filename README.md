@@ -1,6 +1,6 @@
 # Hermes Signals
 
-> **Your agent says "done." Is it lying?**
+> A local-first, deterministic quality layer for AI agents.
 
 [![Tests](https://github.com/DECRUX9812/hermes-signals/actions/workflows/ci.yml/badge.svg)](https://github.com/DECRUX9812/hermes-signals/actions/workflows/ci.yml)
 [![Corpus](https://github.com/DECRUX9812/hermes-signals/actions/workflows/signals-review.yml/badge.svg)](https://github.com/DECRUX9812/hermes-signals/actions/workflows/signals-review.yml)
@@ -8,11 +8,7 @@
 [![No API key](https://img.shields.io/badge/no%20API%20key-required-00C853.svg)](README.md)
 [![No telemetry](https://img.shields.io/badge/no%20telemetry-ever-00C853.svg)](README.md)
 
-**Hermes Signals is a local-first, deterministic quality layer for AI agents.** It
-catches the failures agents are really bad at reporting — claiming success after
-a tool failed, repeating the same broken action forever, editing files without
-verifying them, leaking credentials, losing subagent results — **without a
-single model call, GPU, API key, or byte of outbound telemetry.**
+Hermes Signals detects common agent-behavior failures such as unverified success, repeated failed actions, unsafe edits, credential exposure, and lost subagent results. It runs locally without model calls, API keys, or outbound telemetry.
 
 ```text
 update_record(id=42)  →  TIMEOUT
